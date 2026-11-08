@@ -1096,7 +1096,19 @@ func _copy_room() -> void:
 
 
 func _paleify(n: Node) -> void:
-	if n is MeshInstance3D:
+	if n is MeshInstance3D and (n as MeshInstance3D).material_override == null and (n as MeshInstance3D).mesh != null:
+		var mm := n as MeshInstance3D
+		for i in mm.mesh.get_surface_count():
+			var src2 := mm.get_active_material(i) as StandardMaterial3D
+			if src2 != null:
+				var m3 := src2.duplicate() as StandardMaterial3D
+				m3.albedo_color = Color(1, 1, 1).lerp(Color(0.95, 0.9, 0.85), 0.5)
+				m3.albedo_texture = src2.albedo_texture
+				var m4 := m3
+				m4.emission_enabled = true
+				m4.emission = Color(0.25, 0.24, 0.22)
+				mm.set_surface_override_material(i, m4)
+	elif n is MeshInstance3D:
 		var mi := n as MeshInstance3D
 		var src := mi.material_override as StandardMaterial3D
 		var m := StandardMaterial3D.new()

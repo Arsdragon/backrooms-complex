@@ -10,7 +10,7 @@ const NOTES_L0 := ["note.n01", "note.n02", "note.n03", "note.n04", "note.n05", "
 const NOTES_L1 := ["note.u01", "note.u02", "note.u03", "note.u04", "note.u05"]
 # кто из парка «скопирован» и как именно криво
 const PARK_PEOPLE := ["jogger", "mother", "kid", "oldman", "couple", "suit", "vendor", "teen"]
-const OTHER_PEOPLE := ["civ_a", "civ_b", "civ_c", "worker", "explorer"]
+const OTHER_PEOPLE := ["civ_a", "civ_b", "civ_c", "civ_d", "worker", "explorer"]
 const WRONG := ["wall", "stretch", "twist", "ceiling", "sunk", "flat", "corner", "arms", "hstretch", "seated_air", "none", "fused_floor", "back"]
 const OBJECTS := ["bench", "lamp", "bin", "chair", "desk", "cabinet", "cooler", "ochair", "boxes", "tv", "stroller", "phone", "shelf", "balloon", "sign_park",
 	"wetsign", "wetsign", "wetsign", "wheelchair", "hydrant", "trashbag", "tyre", "utilitybox", "crate", "chair"]

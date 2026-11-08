@@ -621,13 +621,7 @@ static func copy_person(cx: Node3D, d: Dictionary, rng: RandomNumberGenerator, l
 	h.apply_wrong(wrong, rng)
 	h.uncanny(rng)
 	if bool(d.get("mold", false)):
-		for part in h.parts:
-			var mi := part as MeshInstance3D
-			var mm := mi.material_override as ShaderMaterial
-			if mm != null:
-				var m2 := mm.duplicate() as ShaderMaterial
-				m2.set_shader_parameter("mold", 0.55)
-				mi.material_override = m2
+		h.tune({"mold": 0.55})
 	match who:
 		"kid":
 			if rng.randf() < 0.6:
@@ -637,9 +631,9 @@ static func copy_person(cx: Node3D, d: Dictionary, rng: RandomNumberGenerator, l
 				h.hold(bal, "r", Vector3(0, 0.2, 0))
 				h.pose("hold_up")
 		"oldman":
-			box(h.j["wr_l"], Vector3(0.45, 0.32, 0.01), Vector3(0.15, -0.12, 0.08), Mats.col(Color(0.82, 0.8, 0.74), "paper", 1.0, {"pale": 0.3}), Vector3(0, 0, 0.1))
+			box(h.hand("l"), Vector3(0.45, 0.32, 0.01), Vector3(0.15, -0.12, 0.08), Mats.col(Color(0.82, 0.8, 0.74), "paper", 1.0, {"pale": 0.3}), Vector3(0, 0, 0.1))
 		"suit":
-			box(h.j["wr_r"], Vector3(0.42, 0.3, 0.09), Vector3(0, -0.2, 0), Mats.col(Color(0.2, 0.12, 0.06), "metal", 0.3, {"pale": 0.3}))
+			box(h.hand("r"), Vector3(0.42, 0.3, 0.09), Vector3(0, -0.2, 0), Mats.col(Color(0.2, 0.12, 0.06), "metal", 0.3, {"pale": 0.3}))
 		"couple":
 			var h2 := Human.make("civ_b", int(d.get("seed", 1)) + 7, true)
 			h2.pose("sit_ground")

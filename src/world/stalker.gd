@@ -26,16 +26,7 @@ func setup(complex: Node) -> void:
 	cx = complex
 	body = Human.make("civ_c", 913, true)
 	add_child(body)
-	for part in body.parts:
-		var mi := part as MeshInstance3D
-		var mm := mi.material_override as ShaderMaterial
-		if mm != null:
-			var m2 := mm.duplicate() as ShaderMaterial
-			m2.set_shader_parameter("mold", 0.9)
-			m2.set_shader_parameter("pale", 0.7)
-			m2.set_shader_parameter("smear", 2.0)
-			m2.set_shader_parameter("wet", 0.6)
-			mi.material_override = m2
+	body.tune({"mold": 0.9, "pale": 0.7, "smear": 2.0, "wet": 0.6})
 	body.pose("stand")
 	body.scale = Vector3(1.0, 1.08, 1.0)
 	visible = false

@@ -1,0 +1,17 @@
+{
+ "jogger": "Sports_Male_04",
+ "mother": "Female_Adult_02",
+ "kid": "Male_Child_01",
+ "oldman": "Male_Adult_03",
+ "couple": "Male_Adult_06",
+ "couple_b": "Female_Adult_10",
+ "suit": "Business_Male_02",
+ "vendor": "Chef_Female_01",
+ "teen": "Male_Adult_09",
+ "worker": "Business_Male_06",
+ "explorer": "Fire_Male_01",
+ "player": "Male_Adult_05",
+ "civ_a": "Female_Adult_04",
+ "civ_b": "Male_Adult_01",
+ "civ_c": "Female_Adult_12"
+}

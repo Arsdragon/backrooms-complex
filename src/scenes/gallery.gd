@@ -96,6 +96,23 @@ func _ready() -> void:
 			n.rotation.y = 0.0
 			Props.set_light(n, Color(0.45, 0.0, 0.0, 0.0))
 		x += 3.2
+	if set_name == "anim":
+		var spec := [["jogger", "run"], ["mother", "walk"], ["suit", "walk"], ["explorer", "walk"], ["oldman", "read"], ["teen", "sit"]]
+		for k in spec.size():
+			var hh := Human.make(String(spec[k][0]), 5 + k, false)
+			add_child(hh)
+			hh.position = Vector3(-5.0 + k * 2.0, 0, 0)
+			hh.rotation.y = 0.5
+			var pn: String = spec[k][1]
+			if pn == "walk" or pn == "run":
+				hh.pose_name = pn
+			else:
+				hh.pose(pn)
+		var sun := DirectionalLight3D.new()
+		sun.rotation = Vector3(-0.8, 0.6, 0)
+		add_child(sun)
+		e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		e.ambient_light_color = Color(0.5, 0.5, 0.5)
 	if set_name == "lifeform":
 		for k in 3:
 			var lf := LifeformS.new()

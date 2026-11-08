@@ -32,7 +32,7 @@ print("audio patched", na)
 
 # текстуры моделей: мип-карты, VRAM-сжатие, карты нормалей
 nm = 0
-for f in glob.glob(os.path.join(ROOT, "models", "**", "*.jpg.import"), recursive=True) + glob.glob(os.path.join(ROOT, "models", "**", "*.png.import"), recursive=True):
+for f in [x for ext in ("jpg", "png", "tga") for d in ("models", "humans") for x in glob.glob(os.path.join(ROOT, d, "**", "*." + ext + ".import"), recursive=True)]:
     s = open(f, encoding="utf-8").read()
     o = s
     s = re.sub(r"compress/mode=\d", "compress/mode=2", s)

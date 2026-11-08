@@ -1,7 +1,9 @@
 class_name Human
 extends Node3D
-## Процедурный человек из примитивов с суставами. В парке — живой (обычные материалы),
-## в Комплексе — «копия»: бледная, смазанная, с кривым переносом (растянута, в стене, вверх ногами…).
+## Человек. Основной вариант — модель Microsoft Rocketbox (MIT) со скелетом Biped; запасной — из примитивов.
+## В парке — живой (обычные материалы), в Комплексе — «копия»: бледная, смазанная, с кривым переносом.
+## Позы задаются «суставами-посредниками» j[...] (как у примитивного человека, оси совпадают с осями модели);
+## в режиме модели каждый кадр они переводятся в повороты костей (_drive).
 
 var j := {}                 # суставы: имя -> Node3D
 var parts: Array = []       # MeshInstance3D
@@ -17,6 +19,36 @@ var _head_rest := Quaternion()
 var _t := 0.0
 var scale_h := 1.0
 var _twitch := 0.0
+# режим модели
+var sk: Skeleton3D = null
+var _chain: Array = []          # индексы костей цепочки (родители раньше детей)
+var _rest := {}                 # кость -> локальный Transform3D покоя (ортонормированный)
+var _arest := {}                # кость -> глобальный Basis покоя
+var _b2j := {}                  # кость -> имя сустава-посредника
+var _off := {}                  # имя сустава -> поправка (руки из A-позы вниз)
+var _hands := {}                # "l"/"r" -> узел для предметов в руке
+var _root_bone := -1
+var _drive_t := 0.0
+
+## кто в игре -> аватар Rocketbox (humans/<id>/Export/<id>.fbx)
+const CAST := {"jogger": "Sports_Male_04", "mother": "Female_Adult_02", "kid": "Male_Child_01", "oldman": "Male_Adult_03",
+	"couple": "Male_Adult_06", "suit": "Business_Male_02", "vendor": "Chef_Female_01", "teen": "Male_Adult_09",
+	"worker": "Business_Male_06", "explorer": "Fire_Male_01", "player": "Male_Adult_05", "civ_a": "Female_Adult_04",
+	"civ_b": "Female_Adult_10", "civ_c": "Female_Adult_12", "civ_d": "Male_Adult_01"}
+# наш сустав -> кость Biped. Наши «l» стоят на −X, это правая сторона персонажа (R)
+const BONES := {"pelvis": "Bip01 Pelvis", "spine": "Bip01 Spine", "chest": "Bip01 Spine2", "neck": "Bip01 Neck", "head": "Bip01 Head",
+	"sh_l": "Bip01 R UpperArm", "el_l": "Bip01 R Forearm", "wr_l": "Bip01 R Hand",
+	"sh_r": "Bip01 L UpperArm", "el_r": "Bip01 L Forearm", "wr_r": "Bip01 L Hand",
+	"hip_l": "Bip01 R Thigh", "kn_l": "Bip01 R Calf", "an_l": "Bip01 R Foot",
+	"hip_r": "Bip01 L Thigh", "kn_r": "Bip01 L Calf", "an_r": "Bip01 L Foot"}
+const CHAIN := ["Bip01", "Bip01 Pelvis", "Bip01 Spine", "Bip01 Spine1", "Bip01 Spine2", "Bip01 Neck", "Bip01 Head",
+	"Bip01 L Clavicle", "Bip01 L UpperArm", "Bip01 L Forearm", "Bip01 L Hand",
+	"Bip01 R Clavicle", "Bip01 R UpperArm", "Bip01 R Forearm", "Bip01 R Hand",
+	"Bip01 L Thigh", "Bip01 L Calf", "Bip01 L Foot", "Bip01 R Thigh", "Bip01 R Calf", "Bip01 R Foot"]
+# родитель в нашей иерархии суставов
+const JPARENT := {"pelvis": "", "spine": "pelvis", "chest": "spine", "neck": "chest", "head": "neck",
+	"sh_l": "chest", "el_l": "sh_l", "wr_l": "el_l", "sh_r": "chest", "el_r": "sh_r", "wr_r": "el_r",
+	"hip_l": "pelvis", "kn_l": "hip_l", "an_l": "kn_l", "hip_r": "pelvis", "kn_r": "hip_r", "an_r": "kn_r"}
 
 const SKIN := [Color(0.84, 0.69, 0.58), Color(0.72, 0.54, 0.42), Color(0.55, 0.38, 0.28), Color(0.9, 0.76, 0.66)]
 
@@ -96,8 +128,237 @@ static func make(w: String, seed: int, is_copy: bool) -> Human:
 	h.copy = is_copy
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed
-	h._build(outfit(w, rng), rng)
+	var id: String = CAST.get(w, "")
+	var path := "res://humans/%s/Export/%s.fbx" % [id, id]
+	if id != "" and not Cfg.has_arg("prim_humans") and ResourceLoader.exists(path):
+		h._build_model(path, rng)
+	else:
+		h._build(outfit(w, rng), rng)
 	return h
+
+
+func is_model() -> bool:
+	return sk != null
+
+
+## Сборка из модели Rocketbox: невидимые суставы-посредники + скелет
+func _build_model(path: String, rng: RandomNumberGenerator) -> void:
+	var root := _joint("root", self, Vector3.ZERO)
+	var ps: PackedScene = load(path)
+	var inst := ps.instantiate() as Node3D
+	root.add_child(inst)
+	sk = _find_skel(inst)
+	var tex_dir := path.get_base_dir().get_base_dir() + "/Textures/"
+	for mi in _meshes(inst):
+		var m := mi as MeshInstance3D
+		parts.append(m)
+		if m.mesh != null:
+			for i in m.mesh.get_surface_count():
+				var bm := m.get_active_material(i) as BaseMaterial3D
+				if bm != null and bm.albedo_texture == null:
+					var want := "head" if bm.resource_name.to_lower().contains("head") else "body"
+					var tx := _find_tex(tex_dir, want)
+					if tx != null:
+						var nm2 := bm.duplicate() as BaseMaterial3D
+						nm2.albedo_texture = tx
+						nm2.albedo_color = Color(1, 1, 1)
+						m.set_surface_override_material(i, nm2)
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if copy else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		if copy and m.mesh != null:
+			for i in m.mesh.get_surface_count():
+				m.set_surface_override_material(i, Models.complex_mat(m.get_active_material(i), {"pale": 0.5, "smear": 1.0}))
+	# суставы-посредники (вне видимой иерархии), как у примитивного человека
+	var px := Node3D.new()
+	px.name = "_px"
+	add_child(px)
+	var pos := {"pelvis": Vector3(0, 0.95, 0), "spine": Vector3(0, 0.06, 0), "chest": Vector3(0, 0.26, 0), "neck": Vector3(0, 0.2, 0),
+		"head": Vector3(0, 0.11, 0), "sh_l": Vector3(-0.2, 0.14, 0), "sh_r": Vector3(0.2, 0.14, 0), "el_l": Vector3(0, -0.29, 0),
+		"el_r": Vector3(0, -0.29, 0), "wr_l": Vector3(0, -0.26, 0), "wr_r": Vector3(0, -0.26, 0), "hip_l": Vector3(-0.095, -0.04, 0),
+		"hip_r": Vector3(0.095, -0.04, 0), "kn_l": Vector3(0, -0.44, 0), "kn_r": Vector3(0, -0.44, 0), "an_l": Vector3(0, -0.44, 0), "an_r": Vector3(0, -0.44, 0)}
+	for k in BONES.keys():
+		var n := Node3D.new()
+		n.name = "px_" + k
+		n.position = pos[k]
+		px.add_child(n)
+		j[k] = n
+	if sk == null:
+		return
+	var pre := sk.get_bone_name(0).split(" ")[0] if sk.get_bone_count() > 0 else "Bip01"
+	var bidx := {}
+	for nm0 in CHAIN:
+		var nm: String = String(nm0)
+		var b := sk.find_bone(nm.replace("Bip01", pre))
+		if b < 0:
+			continue
+		bidx[nm] = b
+		_chain.append(b)
+		_rest[b] = sk.get_bone_rest(b).orthonormalized()
+		_arest[b] = sk.get_bone_global_rest(b).basis.orthonormalized()
+	for k in BONES.keys():
+		if bidx.has(BONES[k]):
+			_b2j[bidx[BONES[k]]] = k
+	_root_bone = bidx.get("Bip01", -1)
+	# руки из A-позы — вниз
+	for side in ["l", "r"]:
+		var ub: int = bidx.get(BONES["sh_" + side], -1)
+		var fb: int = bidx.get(BONES["el_" + side], -1)
+		if ub < 0 or fb < 0:
+			continue
+		var v := (sk.get_bone_global_rest(fb).origin - sk.get_bone_global_rest(ub).origin).normalized()
+		var q := Quaternion(v, Vector3.DOWN)
+		for jn in ["sh_", "el_", "wr_"]:
+			_off[jn + side] = Basis(q)
+	# руки: узлы для предметов (оси как у модели)
+	for side in ["l", "r"]:
+		var hb: int = bidx.get(BONES["wr_" + side], -1)
+		if hb < 0:
+			continue
+		var ba := BoneAttachment3D.new()
+		ba.bone_idx = hb
+		sk.add_child(ba)
+		var fr := Node3D.new()
+		fr.name = "hold_" + side
+		var o: Basis = _off.get("wr_" + side, Basis())
+		fr.basis = (o * _arest[hb]).inverse()
+		ba.add_child(fr)
+		_hands[side] = fr
+	# «смазанное» лицо поверх головы у части копий
+	if copy and rng.randf() < 0.55 and bidx.has("Bip01 Head"):
+		var hb2: int = bidx["Bip01 Head"]
+		var ba2 := BoneAttachment3D.new()
+		ba2.bone_idx = hb2
+		sk.add_child(ba2)
+		var fr2 := Node3D.new()
+		fr2.basis = (_arest[hb2] as Basis).inverse()
+		ba2.add_child(fr2)
+		var fq := QuadMesh.new()
+		fq.size = Vector2(0.16, 0.21)
+		var face := MeshInstance3D.new()
+		face.mesh = fq
+		face.material_override = Mats.prop("face_face_smear_m", {"tex": "face_smear", "tex_mix": 1.0, "alpha_cut": 0.4, "pale": 0.35, "smear": 0.8})
+		face.position = Vector3(0, 0.075, 0.125)
+		face.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		fr2.add_child(face)
+		parts.append(face)
+	pose("stand")
+	_drive()
+
+
+static func _find_tex(dir: String, part: String) -> Texture2D:
+	var files: PackedStringArray = ResourceLoader.list_directory(dir) if ResourceLoader.has_method("list_directory") else DirAccess.get_files_at(dir)
+	for f in files:
+		var fn := String(f).trim_suffix(".import")
+		if fn.contains(part) and fn.contains("color") and fn.get_extension() in ["tga", "png", "jpg"]:
+			return load(dir + fn)
+	return null
+
+
+func _find_skel(n: Node) -> Skeleton3D:
+	if n is Skeleton3D:
+		return n
+	for c in n.get_children():
+		var s := _find_skel(c)
+		if s != null:
+			return s
+	return null
+
+
+func _meshes(n: Node) -> Array:
+	var out := []
+	if n is MeshInstance3D:
+		out.append(n)
+	for c in n.get_children():
+		out.append_array(_meshes(c))
+	return out
+
+
+## Суставы-посредники -> кости скелета
+func _drive() -> void:
+	if sk == null:
+		return
+	var Q := {}
+	for k in ["pelvis", "spine", "chest", "neck", "head", "sh_l", "el_l", "wr_l", "sh_r", "el_r", "wr_r", "hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]:
+		var p: String = JPARENT[k]
+		var r := Basis((j[k] as Node3D).quaternion)
+		Q[k] = r if p == "" else (Q[p] as Basis) * r
+	var G := {}
+	for b in _chain:
+		var bi: int = b
+		var par := sk.get_bone_parent(bi)
+		var gp: Transform3D = G.get(par, Transform3D.IDENTITY)
+		var rest: Transform3D = _rest[bi]
+		if _b2j.has(bi):
+			var jn: String = _b2j[bi]
+			var o: Basis = _off.get(jn, Basis())
+			var d: Basis = (Q[jn] as Basis) * o * (_arest[bi] as Basis)
+			sk.set_bone_pose_rotation(bi, (gp.basis.inverse() * d).get_rotation_quaternion())
+			G[bi] = Transform3D(d, gp * rest.origin)
+			var sc := (j[jn] as Node3D).scale
+			if not sc.is_equal_approx(Vector3.ONE):
+				var ab: Basis = _arest[bi]
+				var ax := (ab.inverse() * Vector3.UP).abs()
+				var axz := (ab.inverse() * Vector3.RIGHT).abs()
+				var s3 := Vector3.ONE
+				# растяжение вдоль модели Y -> вдоль ближайшей оси кости; X/Z — по двум другим
+				var iy := 0 if ax.x >= ax.y and ax.x >= ax.z else (1 if ax.y >= ax.z else 2)
+				var ix := 0 if axz.x >= axz.y and axz.x >= axz.z else (1 if axz.y >= axz.z else 2)
+				if ix == iy:
+					ix = (iy + 1) % 3
+				var iz := 3 - ix - iy
+				s3[iy] = sc.y
+				s3[ix] = sc.x
+				s3[iz] = sc.z
+				sk.set_bone_pose_scale(bi, s3)
+			else:
+				sk.set_bone_pose_scale(bi, Vector3.ONE)
+		else:
+			sk.set_bone_pose_rotation(bi, rest.basis.get_rotation_quaternion())
+			G[bi] = gp * rest
+	if _root_bone >= 0:
+		var pp := (j["pelvis"] as Node3D).position
+		var delta := (pp - Vector3(0, 0.95, 0)) * 0.95
+		sk.set_bone_pose_position(_root_bone, (_rest[_root_bone] as Transform3D).origin + delta)
+
+
+## Взгляд головы на цель (режим модели: посредник вне иерархии — считаем в локальных осях человека)
+func _look_model(dt: float) -> void:
+	var head: Node3D = j["head"]
+	var t := to_local(look_target.global_position + Vector3(0, 1.5, 0)) - Vector3(0, 1.6, 0)
+	var d := t.length()
+	if d < 8.0 and d > 0.3:
+		var yaw := clampf(atan2(t.x, t.z), -1.2, 1.2)
+		var pitch := clampf(atan2(-t.y, Vector2(t.x, t.z).length()), -0.6, 0.6)
+		var q := Quaternion.from_euler(Vector3(pitch, yaw, 0))
+		head.quaternion = head.quaternion.slerp(q, clampf(dt * 0.35, 0.0, 1.0))
+	else:
+		head.quaternion = head.quaternion.slerp(_head_rest, clampf(dt * 0.2, 0.0, 1.0))
+
+
+## Поменять параметр шейдера у всех материалов копии (плесень, бледность…)
+func tune(params: Dictionary) -> void:
+	for part in parts:
+		var mi := part as MeshInstance3D
+		if mi.material_override is ShaderMaterial:
+			var m := (mi.material_override as ShaderMaterial).duplicate() as ShaderMaterial
+			for k in params.keys():
+				m.set_shader_parameter(k, params[k])
+			mi.material_override = m
+		elif mi.mesh != null:
+			for i in mi.mesh.get_surface_count():
+				var sm := mi.get_surface_override_material(i) as ShaderMaterial
+				if sm == null:
+					continue
+				var m2 := sm.duplicate() as ShaderMaterial
+				for k in params.keys():
+					m2.set_shader_parameter(k, params[k])
+				mi.set_surface_override_material(i, m2)
+
+
+## Узел руки для предметов
+func hand(side: String) -> Node3D:
+	if _hands.has(side):
+		return _hands[side]
+	return j["wr_" + side]
 
 
 func _mat(c: Color, kind := "fabric") -> Material:
@@ -265,8 +526,8 @@ func _build(o: Dictionary, rng: RandomNumberGenerator) -> void:
 
 
 ## Положить в руку предмет (узел), рука l/r
-func hold(item: Node3D, hand := "r", offset := Vector3(0, -0.1, 0.05)) -> void:
-	var w: Node3D = j["wr_" + hand]
+func hold(item: Node3D, side := "r", offset := Vector3(0, -0.1, 0.05)) -> void:
+	var w: Node3D = hand(side)
 	w.add_child(item)
 	item.position = offset
 
@@ -413,7 +674,11 @@ func apply_wrong(w: String, rng: RandomNumberGenerator) -> void:
 			(j["chest"] as Node3D).rotation.y = PI
 			(j["head"] as Node3D).rotation.y = 0.0
 		"arms":
-			for k2 in rng.randi_range(1, 2):
+			if is_model():
+				(j["el_l"] as Node3D).rotation.x = rng.randf_range(0.8, 1.4)
+				(j["sh_r"] as Node3D).rotation = Vector3(rng.randf_range(-2.4, -1.6), 0, rng.randf_range(0.2, 0.6))
+				(j["neck"] as Node3D).rotation.z = rng.randf_range(-0.6, 0.6)
+			for k2 in (0 if is_model() else rng.randi_range(1, 2)):
 				var extra := Node3D.new()
 				(j["chest"] as Node3D).add_child(extra)
 				extra.position = Vector3(rng.randf_range(-0.2, 0.2), rng.randf_range(-0.05, 0.15), rng.randf_range(-0.08, 0.08))
@@ -446,6 +711,18 @@ func apply_wrong(w: String, rng: RandomNumberGenerator) -> void:
 
 
 func _process(dt: float) -> void:
+	_tick(dt)
+	if sk != null:
+		# копии далеко от камеры — обновлять скелет реже
+		_drive_t -= dt
+		if _drive_t <= 0.0:
+			var cam := get_viewport().get_camera_3d()
+			var far := cam != null and cam.global_position.distance_to(global_position) > 25.0
+			_drive_t = 0.25 if far else 0.0
+			_drive()
+
+
+func _tick(dt: float) -> void:
 	_t += dt
 	if pose_name == "walk" or pose_name == "run":
 		phase += dt * anim_speed * (5.2 if pose_name == "walk" else 9.0)
@@ -454,7 +731,9 @@ func _process(dt: float) -> void:
 	if breathe > 0.0:
 		var s := 1.0 + sin(_t * 1.6) * 0.02 * breathe
 		(j["chest"] as Node3D).scale = Vector3(s, 1.0, s)
-	if react and look_target != null and is_instance_valid(look_target):
+	if react and look_target != null and is_instance_valid(look_target) and sk != null:
+		_look_model(dt)
+	elif react and look_target != null and is_instance_valid(look_target):
 		var head: Node3D = j["head"]
 		var to := look_target.global_position + Vector3(0, 1.5, 0) - head.global_position
 		var d := to.length()

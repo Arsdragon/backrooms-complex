@@ -466,7 +466,7 @@ func _people(rng: RandomNumberGenerator) -> void:
 	var pmat := StandardMaterial3D.new()
 	pmat.albedo_texture = Mats.tex("paper")
 	paper.material_override = pmat
-	(old.j["wr_l"] as Node3D).add_child(paper)
+	old.hand("l").add_child(paper)
 	paper.position = Vector3(0.15, -0.12, 0.08)
 	people.append([old, "idle", {}])
 	var couple_a := Human.make("couple", 15, false)
@@ -491,7 +491,7 @@ func _people(rng: RandomNumberGenerator) -> void:
 	var bcmat := StandardMaterial3D.new()
 	bcmat.albedo_color = Color(0.25, 0.14, 0.07)
 	bc.material_override = bcmat
-	(suit.j["wr_r"] as Node3D).add_child(bc)
+	suit.hand("r").add_child(bc)
 	bc.position = Vector3(0, -0.2, 0)
 	people.append([suit, "cross", {"a": Vector3(-50, 0, 20), "b": Vector3(50, 0, -25), "t": 0.3, "speed": 1.35}])
 	var vendor := Human.make("vendor", 18, false)
