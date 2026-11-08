@@ -1,0 +1,83 @@
+; Engine configuration file.
+config_version=5
+
+[application]
+
+config/name="Backrooms: The Complex"
+config/description="Found footage. San Jose, July 14, 1990."
+config/version="1.0.0"
+run/main_scene="res://src/main.tscn"
+config/features=PackedStringArray("4.7", "Forward Plus")
+config/icon="res://icon.png"
+config/use_custom_user_dir=true
+config/custom_user_dir_name="BackroomsComplex"
+boot_splash/bg_color=Color(0, 0, 0, 1)
+boot_splash/show_image=false
+run/max_fps=0
+
+[autoload]
+
+Cfg="*res://src/autoload/cfg.gd"
+Loc="*res://src/autoload/loc.gd"
+Snd="*res://src/autoload/snd.gd"
+Game="*res://src/autoload/game.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/vsync/vsync_mode=1
+
+[gui]
+
+theme/default_font_antialiasing=1
+
+[physics]
+
+common/physics_ticks_per_second=60
+
+[rendering]
+
+textures/canvas_textures/default_texture_filter=1
+anti_aliasing/quality/msaa_3d=0
+environment/defaults/default_clear_color=Color(0, 0, 0, 1)
+lights_and_shadows/directional_shadow/size=2048
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=1
+textures/default_filters/anisotropic_filtering_level=1
+
+[shader_globals]
+
+g_flick_a={
+"type": "vec4",
+"value": Vector4(1, 1, 1, 1)
+}
+g_flick_b={
+"type": "vec4",
+"value": Vector4(1, 1, 1, 1)
+}
+g_dim={
+"type": "vec4",
+"value": Vector4(0, -1000, 0, 0)
+}
+g_null={
+"type": "vec4",
+"value": Vector4(0, -1000, 0, 0)
+}
+g_fog={
+"type": "vec4",
+"value": Vector4(0.1, 0.09, 0.05, 0.02)
+}
+g_ambient={
+"type": "float",
+"value": 0.015
+}
+g_time={
+"type": "float",
+"value": 0.0
+}
+g_cam_light={
+"type": "vec4",
+"value": Vector4(0, -1000, 0, 0)
+}

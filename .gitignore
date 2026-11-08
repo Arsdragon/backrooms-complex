@@ -1,0 +1,6 @@
+.godot/
+build/
+release/
+*.tmp
+release/
+build/
