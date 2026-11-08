@@ -5,6 +5,7 @@ extends RefCounted
 const ARCH := preload("res://src/shaders/arch.gdshader")
 const PROP := preload("res://src/shaders/prop.gdshader")
 const GLASS := preload("res://src/shaders/glass.gdshader")
+const WATER_CX := preload("res://src/shaders/water_cx.gdshader")
 const CB := preload("res://src/world/chunk_builder.gd")
 
 static var _arch := {}
@@ -62,6 +63,14 @@ static func arch(id: int) -> Material:
 			g.set_shader_parameter("noise_tex", tex("noise"))
 			m = g
 		CB.M_CABLE: m = _a("metal", "metal", Vector2(1.0, 1.0), 0.0, {"tint": Vector3(0.75, 0.32, 0.08)})
+		CB.M_WALL_PAINT: m = _a("wall_paint", "wall_paint_dirty", Vector2(1.5, 1.5), 0.45)
+		CB.M_WALL_SCHOOL: m = _a("wall_school", "wall_school_dirty", Vector2(2.4, 2.4), 0.35)
+		CB.M_LINO: m = _a("linoleum", "linoleum_dirty", Vector2(1.2, 1.2), 0.45)
+		CB.M_WATER:
+			var wm := ShaderMaterial.new()
+			wm.shader = WATER_CX
+			wm.set_shader_parameter("noise_tex", tex("noise"))
+			m = wm
 		CB.M_RED_LAMP: m = _a("fixture", "fixture", Vector2(1.0, 1.0), 0.0, {"emissive": 2.2})
 		_: m = _a("wall_yellow", "wall_yellow", Vector2(1, 1), 0.0)
 	_arch[id] = m

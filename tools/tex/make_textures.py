@@ -378,6 +378,39 @@ def grass():
     save("grass", col)
 
 
+def paints():
+    """Крашеные стены магазина и школы, линолеум"""
+    n = 512
+    y, x = np.mgrid[0:n, 0:n] / n
+    g = pnoise(n, 2.6, 401)
+    f = pnoise(n, 1.4, 402)
+    col = rgb((214, 208, 190))[None, None, :] * (0.95 + (g - 0.5) * 0.06 + (f - 0.5) * 0.03)[..., None]
+    save("wall_paint", col)
+    st = stains(n, 0.45, 403, (2, 7))
+    drip = np.clip((pnoise(n, 2.0, 404, aniso=(0.4, 6.0)) - 0.55) * 3.0, 0, 1)
+    save("wall_paint_dirty", col * (1.0 - st[..., None] * 0.35) * (1.0 - drip[..., None] * 0.2))
+    # школа: снизу зелёная масляная краска, полоса, сверху беж (текстура = высота 2.4 м)
+    low = rgb((96, 132, 104))
+    up = rgb((214, 206, 176))
+    yy = y
+    band = (np.abs(yy - 0.5) < 0.012).astype(float)
+    col2 = np.where((yy < 0.5)[..., None], low[None, None, :], up[None, None, :]) * (0.95 + (g - 0.5) * 0.08)[..., None]
+    col2 = col2 * (1 - band[..., None]) + rgb((60, 70, 60))[None, None, :] * band[..., None]
+    save("wall_school", col2)
+    st2 = stains(n, 0.4, 405, (2, 6))
+    save("wall_school_dirty", col2 * (1.0 - st2[..., None] * 0.3))
+    # линолеум: плитки 30 см шахматкой (текстура 1.2 м)
+    chk = ((np.floor(x * 4) + np.floor(y * 4)) % 2)
+    gl = (np.abs(x * 4 - np.round(x * 4)) * n / 4 < 1.0) | (np.abs(y * 4 - np.round(y * 4)) * n / 4 < 1.0)
+    col3 = np.where(chk[..., None] > 0.5, rgb((176, 170, 150))[None, None, :], rgb((120, 118, 108))[None, None, :])
+    col3 = col3 * (0.92 + (g - 0.5) * 0.12)[..., None] * (1 - gl[..., None] * 0.25)
+    save("linoleum", col3)
+    st3 = stains(n, 0.4, 406, (1, 5))
+    save("linoleum_dirty", col3 * (1.0 - st3[..., None] * 0.4))
+    # обои с отслоением: тёмная основа под обоями
+    save("wall_under", rgb((96, 86, 60))[None, None, :] * (0.8 + (g - 0.5) * 0.3)[..., None])
+
+
 def grass_tuft():
     n = 128
     img = Image.new("RGBA", (n, n), (0, 0, 0, 0))
@@ -515,6 +548,7 @@ def main():
     faces()
     grass()
     grass_tuft()
+    paints()
     path()
     bark()
     leaves()

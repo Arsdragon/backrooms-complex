@@ -26,6 +26,20 @@ CAST = {
     "civ_a": "Adults/Female_Adult_04",
     "civ_b": "Adults/Male_Adult_01",
     "civ_c": "Adults/Female_Adult_12",
+    "civ_d": "Adults/Male_Adult_01",
+    # другие пропавшие (разнообразие копий)
+    "civ_e": "Professions/Business_Female_01",
+    "civ_f": "Adults/Female_Adult_01",
+    "civ_g": "Adults/Female_Adult_06",
+    "civ_h": "Adults/Male_Adult_13",
+    "civ_i": "Adults/Male_Adult_16",
+    "civ_j": "Professions/Medical_Male_01",
+    "civ_k": "Professions/Police_Male_01",
+    "civ_l": "Children/Female_Child_01",
+    "civ_m": "Children/Male_Child_02",
+    "civ_n": "Professions/Gardener_Male_01",
+    "civ_o": "Professions/Security_Male_01",
+    "civ_p": "Adults/Male_Adult_14",
 }
 
 

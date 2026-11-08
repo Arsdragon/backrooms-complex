@@ -23,6 +23,18 @@ IDS = [
     "wall_clock", "hanging_picture_frame_01", "Television_01",
     # подвал и изолятор
     "lightbulb_01", "metal_stool_01",
+    # вторая партия: странные комнаты
+    "SchoolDesk_01", "standing_chalkboard_01", "modular_industrial_pipes_01", "modular_airduct_circular_01", "ladder_sectioned_01",
+    "CashRegister_01", "modern_coffee_table_01", "side_table_01", "coffee_table_round_01", "Ottoman_01", "GreenChair_01",
+    "mid_century_lounge_chair", "painted_wooden_sofa", "sofa_02", "sofa_03", "ClassicNightstand_01", "wooden_bookshelf_worn",
+    "boombox", "cassette_player", "vintage_suitcase", "can_rusted", "plastic_bottle_gallon", "long_life_food", "russian_food_cans_01",
+    "office_notepads", "korean_fire_extinguisher_01", "fire_alarm", "mounted_fluorescent_lights", "industrial_wall_lamp",
+    "measuring_tape_01", "metal_tool_chest", "hand_truck", "barrel_03", "projector_screen", "ceiling_fan", "security_camera_02",
+    "standing_picture_frame_01", "dining_table", "round_wooden_table_01", "wooden_stool_01", "Rockingchair_01", "folding_wooden_stool",
+    "potted_plant_04", "hanging_industrial_lamp", "pull_chain_light_socket", "metal_stool_02", "steel_frame_shelves_03", "worn_metal_rack",
+    "water_manhole_cover", "rubber_duck_toy", "concrete_cat_statue", "marble_bust_01", "street_rat", "mousetrap", "wooden_ladder",
+    "dartboard", "alarm_clock_01", "postcard_set_01", "portable_cassette_player", "plastic_container", "drawer_cabinet",
+    "exterior_aircon_unit", "bar_chair_round_01", "old_bed_frame", "classic_laptop",
 ]
 
 

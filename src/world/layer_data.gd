@@ -30,6 +30,9 @@ const Z_TILE := 7
 const Z_SKY := 8
 const Z_PITS := 9
 const Z_CELLAR := 10
+const Z_FLIP := 11      # комната-перевёртыш: ковёр на потолке, лампы на полу
+const Z_STORE := 12     # копия мебельного магазина
+const Z_CLASS := 13     # школьный класс
 # светильники
 const L_NONE := 0
 const L_ON := 1
@@ -54,6 +57,8 @@ var light := PackedByteArray()
 var ceil_h := PackedByteArray()     # дециметры
 var post := PackedByteArray()       # 1 — колонна в СЗ-углу клетки
 var cable := PackedByteArray()      # биты направлений кабеля
+var water := PackedByteArray()      # 1 — пол залит водой
+var used := PackedByteArray()       # 1 — особая комната; 2 — особая и свет расставлен вручную
 var cable_par := PackedInt32Array() # для меток: куда вести к станции (индекс направления+1)
 var cable_dist := PackedInt32Array()
 var reach := PackedByteArray()
@@ -153,6 +158,10 @@ func init_arrays() -> void:
 	ceil_h.resize(nn)
 	post.resize(nn)
 	cable.resize(nn)
+	water.resize(nn)
+	water.fill(0)
+	used.resize(nn)
+	used.fill(0)
 	reach.resize(nn)
 	cable_par.resize(nn)
 	cable_dist.resize(nn)
@@ -290,6 +299,8 @@ func stamp_room(x0: int, z0: int, w: int, h: int, z_id: int, openings := 2, open
 			zone[idx(x, z)] = z_id
 			flo[idx(x, z)] = F_FLOOR
 			post[idx(x, z)] = 0
+			if used[idx(x, z)] == 0:
+				used[idx(x, z)] = 1
 			if i < w - 1:
 				wall_e[idx(x, z)] = E_OPEN
 			if j < h - 1:
@@ -344,7 +355,7 @@ func place_lights(dark_bias: float) -> void:
 			if flo[i] != F_FLOOR and flo[i] != F_PIT:
 				light[i] = L_NONE
 				continue
-			if light[i] != L_NONE:
+			if light[i] != L_NONE or used[i] == 2:
 				continue
 			var r := rng.randf()
 			match zn:
@@ -409,35 +420,51 @@ func fix_connectivity(sx: int, sz: int) -> void:
 
 
 func _bfs_expand(q: PackedInt32Array) -> void:
+	# быстрый обход без вызовов функций на каждой клетке (мир — тор)
+	var n := N
+	var last := n - 1
 	var head := 0
 	while head < q.size():
 		var i := q[head]
 		head += 1
-		var x := i % N
-		var z := i / N
-		for d in 4:
-			if not can_step(x, z, d):
-				continue
-			var o: Vector2i = DIRS[d]
-			var j := idx(x + o.x, z + o.y)
-			if reach[j]:
-				continue
+		var x := i % n
+		var z := i / n
+		var j := i + 1 if x < last else i - last
+		var v := wall_e[i]
+		if v != E_WALL and v != E_WINDOW and reach[j] == 0 and flo[j] == F_FLOOR:
+			reach[j] = 1
+			q.append(j)
+		j = i - 1 if x > 0 else i + last
+		v = wall_e[j]
+		if v != E_WALL and v != E_WINDOW and reach[j] == 0 and flo[j] == F_FLOOR:
+			reach[j] = 1
+			q.append(j)
+		j = i + n if z < last else x
+		v = wall_s[i]
+		if v != E_WALL and v != E_WINDOW and reach[j] == 0 and flo[j] == F_FLOOR:
+			reach[j] = 1
+			q.append(j)
+		j = i - n if z > 0 else i + n * last
+		v = wall_s[j]
+		if v != E_WALL and v != E_WINDOW and reach[j] == 0 and flo[j] == F_FLOOR:
 			reach[j] = 1
 			q.append(j)
 
 
 ## BFS от точки по проходимым клеткам: расстояния (в клетках) и направление «назад к источнику»
 func bfs_from(sx: int, sz: int, max_d := 100000) -> Array:
+	var n := N
+	var last := n - 1
 	var dist := PackedInt32Array()
-	dist.resize(N * N)
+	dist.resize(n * n)
 	dist.fill(-1)
 	var par := PackedByteArray()
-	par.resize(N * N)
+	par.resize(n * n)
 	par.fill(255)
 	var q := PackedInt32Array()
-	var s := idx(sx, sz)
-	dist[s] = 0
-	q.append(s)
+	var s0 := idx(sx, sz)
+	dist[s0] = 0
+	q.append(s0)
 	var head := 0
 	while head < q.size():
 		var i := q[head]
@@ -445,24 +472,40 @@ func bfs_from(sx: int, sz: int, max_d := 100000) -> Array:
 		var dd := dist[i]
 		if dd >= max_d:
 			continue
-		var x := i % N
-		var z := i / N
-		for d in 4:
-			if not can_step(x, z, d):
-				continue
-			var o: Vector2i = DIRS[d]
-			var j := idx(x + o.x, z + o.y)
-			if dist[j] >= 0:
-				continue
-			dist[j] = dd + 1
-			par[j] = (d + 2) % 4   # направление обратно к источнику
+		var nd := dd + 1
+		var x := i % n
+		var z := i / n
+		# восток (обратно — на запад = 2)
+		var j := i + 1 if x < last else i - last
+		var v := wall_e[i]
+		if v != E_WALL and v != E_WINDOW and dist[j] < 0 and flo[j] == F_FLOOR:
+			dist[j] = nd
+			par[j] = 2
+			q.append(j)
+		j = i - 1 if x > 0 else i + last
+		v = wall_e[j]
+		if v != E_WALL and v != E_WINDOW and dist[j] < 0 and flo[j] == F_FLOOR:
+			dist[j] = nd
+			par[j] = 0
+			q.append(j)
+		j = i + n if z < last else x
+		v = wall_s[i]
+		if v != E_WALL and v != E_WINDOW and dist[j] < 0 and flo[j] == F_FLOOR:
+			dist[j] = nd
+			par[j] = 3
+			q.append(j)
+		j = i - n if z > 0 else i + n * last
+		v = wall_s[j]
+		if v != E_WALL and v != E_WINDOW and dist[j] < 0 and flo[j] == F_FLOOR:
+			dist[j] = nd
+			par[j] = 1
 			q.append(j)
 	return [dist, par]
 
 
 ## Кабели Async от станции (sx, sz): несколько линий до дальних концов
 func lay_cables(sx: int, sz: int, ends: Array) -> void:
-	var res := bfs_from(sx, sz)
+	var res := bfs_from(sx, sz, 170)
 	var dist: PackedInt32Array = res[0]
 	var par: PackedByteArray = res[1]
 	for e in ends:
@@ -500,7 +543,7 @@ func find_cell_near(tx: int, tz: int, radius: int, cond: Callable) -> Vector2i:
 
 func is_plain(x: int, z: int) -> bool:
 	var i := idx(x, z)
-	return flo[i] == F_FLOOR and (zone[i] == Z_YELLOW or zone[i] == Z_DARK or zone[i] == Z_OLD or zone[i] == Z_CONCRETE or zone[i] == Z_TILE)
+	return flo[i] == F_FLOOR and ceil_h[i] >= 24 and (zone[i] == Z_YELLOW or zone[i] == Z_DARK or zone[i] == Z_OLD or zone[i] == Z_CONCRETE or zone[i] == Z_TILE)
 
 
 ## Свободна ли прямоугольная область под штамп (нет уже поставленных особых комнат)
@@ -508,9 +551,12 @@ func area_free(x0: int, z0: int, w: int, h: int) -> bool:
 	for i in range(-1, w + 1):
 		for j in range(-1, h + 1):
 			var zi := zone[idx(x0 + i, z0 + j)]
-			if zi == Z_ASYNC or zi == Z_HOUSE or zi == Z_STRETCH or zi == Z_SKY or zi == Z_PITS or zi == Z_CELLAR:
+			if zi == Z_ASYNC or zi == Z_HOUSE or zi == Z_STRETCH or zi == Z_SKY or zi == Z_PITS or zi == Z_CELLAR \
+					or zi == Z_FLIP or zi == Z_STORE or zi == Z_CLASS:
 				return false
-			if flo[idx(x0 + i, z0 + j)] == F_SOLID:
+			if ceil_h[idx(x0 + i, z0 + j)] != 27 and ceil_h[idx(x0 + i, z0 + j)] != 25 and ceil_h[idx(x0 + i, z0 + j)] != 28:
+				return false
+			if flo[idx(x0 + i, z0 + j)] == F_SOLID or used[idx(x0 + i, z0 + j)] != 0:
 				return false
 	return true
 

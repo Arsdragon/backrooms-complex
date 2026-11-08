@@ -20,7 +20,8 @@ R = np.random.default_rng(1990)
 
 LOOPS = {"hum_fluor", "room_tone", "null_hum", "park_ambience", "wind_trees", "water_loop", "jingle", "generator",
          "threshold_hum", "tv_static", "fridge_hum", "radio_static", "tape_whir", "sea_waves", "wind_open", "wind_fall",
-         "upstairs_tv", "crickets", "death_drone", "birds_wrong", "jingle_wrong", "music_box", "engine_tick"}
+         "upstairs_tv", "crickets", "death_drone", "birds_wrong", "jingle_wrong", "music_box", "engine_tick",
+         "vending_hum", "speaker_hiss", "tv_news", "tv_jingle", "tv_home", "clock_tick", "vent_air", "store_muzak", "water_amb"}
 
 
 # ----------------------------------------------------------------- базовые кирпичики
@@ -803,13 +804,117 @@ def hatch():
         save(f"grunt_{i + 1}", norm(lp(g, 2500), 0.6))
 
 
+MUZAK = [(64, 1.0), (67, 0.5), (72, 0.5), (71, 1.0), (67, 1.0), (69, 0.5), (67, 0.5), (64, 1.0), (62, 1.0), (60, 2.0),
+         (64, 1.0), (65, 0.5), (67, 0.5), (69, 1.0), (72, 1.0), (71, 0.5), (69, 0.5), (67, 2.0), (None, 1.0)]
+ADJ = [(72, 0.5), (76, 0.5), (79, 1.0), (84, 1.5), (None, 0.5), (79, 0.5), (84, 2.0), (None, 2.0)]
+
+
+def rooms_sfx():
+    # дверь: скрип петель
+    for i in range(2):
+        sec = 1.6
+        t = T(sec)
+        f = np.interp(t, [0, 0.4, 1.2, 1.6], [R.uniform(300, 420), R.uniform(520, 700), R.uniform(350, 450), 300])
+        creak = resonator(white(sec) * 0.3 * (0.5 + 0.5 * np.sin(2 * np.pi * 23 * t)), f, 30) * adsr(len(t), 0.1, 0.3, 0.7, 0.4)
+        click = np.sin(2 * np.pi * 900 * t) * np.exp(-t * 60) * 0.3
+        save(f"door_open_{i + 1}", norm(reverb(creak + click, 0.8, 0.25), 0.7))
+    # телефон: звонок, трубка, короткие гудки
+    sec = 4.0
+    t = T(sec)
+    ring = (np.sin(2 * np.pi * 440 * t) + np.sin(2 * np.pi * 480 * t)) * 0.5
+    ring *= (np.sign(np.sin(2 * np.pi * 20 * t)) * 0.5 + 0.5)
+    ring *= (((t % 3.0) < 1.0) | (((t % 3.0) > 1.3) & ((t % 3.0) < 2.3))).astype(float)
+    save("phone_ring", norm(bp(ring, 300, 3000), 0.75))
+    sec = 0.5
+    t = T(sec)
+    save("phone_pickup", norm(np.sin(2 * np.pi * 120 * t) * np.exp(-t * 30) + hp(white(sec), 1500) * np.exp(-t * 40) * 0.5, 0.7))
+    sec = 3.0
+    t = T(sec)
+    busy = np.sin(2 * np.pi * 425 * t) * ((t % 0.6) < 0.3)
+    save("phone_busy", norm(bp(busy, 300, 3400), 0.5))
+    # торговый автомат: компрессор
+    sec = 6.0
+    t = T(sec)
+    hum = np.sin(2 * np.pi * 50 * t) * 0.5 + np.sin(2 * np.pi * 100 * t) * 0.3 + lp(pink(sec), 400) * 0.3
+    hum = hum + np.sin(2 * np.pi * 7800 * t) * 0.01
+    save("vending_hum", norm(loopify(hum, 0.5), 0.5))
+    # колонки: шипение
+    sec = 6.0
+    t = T(sec)
+    hs = bp(white(sec), 800, 6000) * (0.6 + 0.4 * np.abs(np.sin(2 * np.pi * 0.4 * t)))
+    save("speaker_hiss", norm(loopify(hs, 0.5), 0.4))
+    # телевизор: диктор, джингл рекламы, домашнее видео
+    sec = 12.0
+    t = T(sec)
+    nv = np.zeros(len(t))
+    at = 0.2
+    while at < sec - 1.0:
+        d = R.uniform(0.5, 1.6)
+        tt = T(d)
+        f0 = np.full(len(tt), R.uniform(115, 135)) * (1 + 0.08 * np.sin(2 * np.pi * 2.5 * tt))
+        v = voice(f0, [(0, R.choice(list("aeo"))), (0.5, R.choice(list("iuy"))), (1, R.choice(list("aeo")))], breath=0.2)
+        place(nv, v * adsr(len(tt), 0.03, 0.1, 0.8, 0.1), at)
+        at += d + R.uniform(0.08, 0.3)
+    save("tv_news", norm(loopify(bp(nv, 300, 3000) + bp(white(sec), 2000, 6000) * 0.02, 0.6), 0.45))
+    j = melody(ADJ, 120)
+    jr = bp(reverb(j, 0.5, 0.2)[: len(j)], 300, 4000)
+    save("tv_jingle", norm(loopify(jr, 0.3), 0.45))
+    n10 = len(T(10.0))
+    hv = np.zeros(n10)
+    for k in range(10):
+        d = R.uniform(0.3, 0.9)
+        tt = T(d)
+        v = voice(np.interp(tt / d, [0, 0.5, 1], [R.uniform(180, 300), R.uniform(250, 380), R.uniform(160, 260)]), [(0, "a"), (1, R.choice(list("aeo")))], breath=0.4)
+        place(hv, v * adsr(len(tt), 0.02, 0.1, 0.7, 0.2) * R.uniform(0.3, 0.8), R.uniform(0, 9.0))
+    save("tv_home", norm(loopify(bp(reverb(hv, 0.8, 0.4)[:n10], 300, 3000), 0.5), 0.4))
+    # часы
+    sec = 4.0
+    x = np.zeros(int(sec * SR))
+    for k in range(4):
+        tt = T(0.03)
+        place(x, hp(white(0.03), 2000) * np.exp(-tt * 300) * (0.8 if k % 2 == 0 else 0.6), k * 1.0)
+    save("clock_tick", norm(x, 0.5))
+    # трубы
+    for i in range(3):
+        sec = 1.5
+        t = T(sec)
+        knock = np.sin(2 * np.pi * R.uniform(140, 220) * t) * np.exp(-t * 6) + np.sin(2 * np.pi * R.uniform(600, 900) * t) * np.exp(-t * 15) * 0.4
+        save(f"pipe_knock_{i + 1}", norm(reverb(knock, 1.5, 0.4), 0.6))
+    sec = 8.0
+    save("vent_air", norm(loopify(bp(pink(sec), 200, 2500) * 0.8, 0.8), 0.35))
+    # капли
+    for i in range(4):
+        sec = 0.6
+        t = T(sec)
+        f = np.interp(t, [0, 0.05, 0.6], [R.uniform(900, 1400), R.uniform(1800, 2600), 1600])
+        drop = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t * 30)
+        save(f"drip_{i + 1}", norm(reverb(drop, 1.2, 0.45), 0.6))
+    # крыса
+    for i in range(2):
+        sec = 0.4
+        t = T(sec)
+        sq = np.sin(2 * np.pi * np.cumsum(np.interp(t, [0, 0.1, 0.4], [3000, 4200, 3500])) / SR) * adsr(len(t), 0.01, 0.05, 0.6, 0.1) * (np.sin(2 * np.pi * 30 * t) > -0.3)
+        save(f"rat_squeak_{i + 1}", norm(sq * 0.6 + hp(white(sec), 3000) * np.exp(-t * 10) * 0.2, 0.5))
+    # музыка магазина, «плывущая»
+    mz = melody(MUZAK, 84, detune=0.02, wobble=0.01, drop=0.05)
+    mz = lp(reverb(mz, 2.5, 0.5), 2200)
+    save("store_muzak", norm(loopify(mz, 0.8), 0.4))
+    # вода в затопленных залах
+    sec = 10.0
+    t = T(sec)
+    wa = lp(pink(sec), 900) * 0.5 + bp(white(sec), 1500, 5000) * 0.05 * (1 + np.sin(2 * np.pi * 0.2 * t))
+    for k in range(20):
+        place(wa, chirp(R.uniform(600, 1200), R.uniform(900, 1800), 0.04) * 0.15, R.uniform(0, sec - 0.1))
+    save("water_amb", norm(loopify(wa, 1.0), 0.4))
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     only = sys.argv[1:]
     jobs = [("hum_fluor", hum_fluor), ("room_tone", room_tone), ("null_hum", null_hum), ("null_burst", null_burst),
             ("threshold", threshold_hum), ("threshold_pass", threshold_pass), ("step", steps), ("breath", breath_heavy),
             ("lf_", lifeform), ("st_", stalker), ("copy_", copies), ("misc", misc_complex), ("music", music), ("bird", birds),
-            ("park", park), ("machines", machines), ("outdoors", outdoors), ("sfx", sfx), ("hatch", hatch)]
+            ("park", park), ("machines", machines), ("outdoors", outdoors), ("sfx", sfx), ("hatch", hatch), ("rooms", rooms_sfx)]
     for name, fn in jobs:
         if only and not any(name.startswith(o) or o.startswith(name) for o in only):
             continue

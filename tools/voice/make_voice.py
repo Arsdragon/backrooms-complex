@@ -16,12 +16,14 @@ BS = chr(92)
 STR = '"((?:[^"' + BS + BS + ']|' + BS + BS + '.)*)"'
 pat = re.compile('"((?:radio|int|sub)' + BS + '.[a-z0-9_]+)":' + BS + 's*' + BS + '[' + BS + 's*' + STR + ',' + BS + 's*' + STR + BS + 's*' + BS + ']', re.S)
 lines = {m.group(1): (m.group(2), m.group(3)) for m in pat.finditer(src)}
-WANT = [k for k in lines if k.startswith("radio.") or k.startswith("int.") or k.startswith("sub.wall")]
+WANT = [k for k in lines if k.startswith("radio.") or k.startswith("int.") or k.startswith("sub.wall") or k == "sub.phone"]
+if len(sys.argv) > 1:
+    WANT = [k for k in WANT if k in sys.argv[1:]]
 
 def voice_for(key, lang):
     if lang == "en":
         return "Zira"
-    if key.startswith("radio."):
+    if key.startswith("radio.") or key == "sub.phone":
         return "Irina"
     return "Pavel"
 
@@ -96,6 +98,11 @@ for it in items:
         y = np.tanh(y * 1.6)
         y = reverb(np.concatenate([pad, y, pad]), 0.5, 0.25, 4000)
         y += np.sin(2 * np.pi * 60 * np.arange(len(y)) / SR) * 0.015
+    elif k == "sub.phone":
+        y = bp(x, 320, 3300)
+        y = np.tanh(y * 2.2)
+        y = np.concatenate([pad, y, pad])
+        y = y + bp(R.standard_normal(len(y)), 1000, 4000) * 0.03
     else:
         y = lp(x, 800) * 1.3
         y = reverb(np.concatenate([pad, y, pad]), 0.9, 0.35, 1500)

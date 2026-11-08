@@ -17,7 +17,8 @@ print("patched", changed)
 sys.path.insert(0, os.path.join(ROOT, "tools", "audio"))
 LOOPS = {"hum_fluor", "room_tone", "null_hum", "park_ambience", "wind_trees", "water_loop", "jingle", "generator",
          "threshold_hum", "tv_static", "fridge_hum", "radio_static", "tape_whir", "sea_waves", "wind_open", "wind_fall",
-         "upstairs_tv", "crickets", "death_drone", "birds_wrong", "jingle_wrong", "music_box", "engine_tick"}
+         "upstairs_tv", "crickets", "death_drone", "birds_wrong", "jingle_wrong", "music_box", "engine_tick",
+         "vending_hum", "speaker_hiss", "tv_news", "tv_jingle", "tv_home", "clock_tick", "vent_air", "store_muzak", "water_amb"}
 na = 0
 for f in glob.glob(os.path.join(ROOT, "audio", "*.ogg.import")):
     name = os.path.basename(f)[:-len(".ogg.import")]

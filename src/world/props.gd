@@ -8,6 +8,7 @@ static var _decals := {}
 static var park_mode := false   # парк/концовки: модели с обычными PBR-материалами
 static var _font_hand: Font = null
 static var _font_sign: Font = null
+static var _pr: GDScript = null
 
 
 static func font_hand() -> Font:
@@ -254,7 +255,39 @@ static func spawn(cx: Node3D, d: Dictionary, layer: int) -> Node3D:
 		"sound": return sound_emitter(d)
 		"voice_wall": return voice_wall(cx)
 		"red_city": return red_city(d, rng)
-	return null
+		"side_room": return side_room(d, rng)
+	if _pr == null:
+		_pr = load("res://src/world/props_rooms.gd")
+	return _pr.spawn(cx, d, rng, layer)
+
+
+## Боковая комната: ковёр на западной стене, мебель «стоит» на ней, на восточной стене — светильник
+static func side_room(d: Dictionary, rng: RandomNumberGenerator) -> Node3D:
+	var n := Node3D.new()
+	var w := float(d.get("w", 9.6))
+	var h := float(d.get("h", 9.6))
+	var cm := Mats.prop("carpet_side", {"tex": "carpet", "tex_mix": 1.0, "uv_scale": Vector2(w / 1.5, 2.6 / 1.5)})
+	var wx := -w * 0.5 + 0.12
+	quad(n, Vector2(h - 0.25, 2.66), Vector3(wx, 1.33, 0), cm, Vector3(0, PI * 0.5, 0))
+	# пол покрыт обоями — будто комнату повернули
+	quad(n, Vector2(w - 0.3, h - 0.3), Vector3(0, 0.012, 0), Mats.prop("wall_floor", {"tex": "wall_yellow", "tex_mix": 1.0, "uv_scale": Vector2(w / 0.8, h / 0.8)}), Vector3(-PI * 0.5, 0, 0))
+	# мебель на стене (повернута на 90°)
+	var things := [["desk", Vector3(0, 1.2, -1.0)], ["ochair", Vector3(0, 0.7, 0.6)], ["cabinet", Vector3(0, 2.0, 1.6)], ["chair", Vector3(0, 1.6, -2.4)]]
+	for t in things:
+		var a: Array = t
+		var hold := Node3D.new()
+		n.add_child(hold)
+		hold.position = Vector3(wx, 0, 0) + a[1]
+		hold.rotation = Vector3(0, rng.randf_range(-0.3, 0.3), -PI * 0.5)
+		match String(a[0]):
+			"desk": _desk(hold)
+			"ochair": _ochair(hold)
+			"cabinet": _cabinet(hold)
+			_: _chair(hold)
+	# светильник на восточной стене
+	var lamp := quad(n, Vector2(0.6, 1.2), Vector3(w * 0.5 - 0.13, 1.4, 0), Mats.prop("fixture_side", {"tex": "fixture", "tex_mix": 1.0, "emit": 2.2, "emit_color": Vector3(1, 0.97, 0.88)}), Vector3(0, -PI * 0.5, 0))
+	lamp.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return n
 
 
 # ------------------------------------------------------------ парк и мебель

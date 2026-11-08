@@ -4,13 +4,15 @@ extends RefCounted
 ## Слой 0 — «Коридоры» (жёлтые комнаты). Слой 1 — нижние секции (темнота, бетон, плитка), куда падают через ямы.
 
 const LD := preload("res://src/world/layer_data.gd")
+const Rooms := preload("res://src/world/worldgen_rooms.gd")
 
 const GRAF_COUNT := 36
 const NOTES_L0 := ["note.n01", "note.n02", "note.n03", "note.n04", "note.n05", "note.n06", "note.n07", "note.n08"]
 const NOTES_L1 := ["note.u01", "note.u02", "note.u03", "note.u04", "note.u05"]
 # кто из парка «скопирован» и как именно криво
 const PARK_PEOPLE := ["jogger", "mother", "kid", "oldman", "couple", "suit", "vendor", "teen"]
-const OTHER_PEOPLE := ["civ_a", "civ_b", "civ_c", "civ_d", "worker", "explorer"]
+const OTHER_PEOPLE := ["civ_a", "civ_b", "civ_c", "civ_d", "civ_e", "civ_f", "civ_g", "civ_h", "civ_i", "civ_j", "civ_k", "civ_l",
+	"civ_m", "civ_n", "civ_o", "civ_p", "worker", "explorer"]
 const WRONG := ["wall", "stretch", "twist", "ceiling", "sunk", "flat", "corner", "arms", "hstretch", "seated_air", "none", "fused_floor", "back"]
 const OBJECTS := ["bench", "lamp", "bin", "chair", "desk", "cabinet", "cooler", "ochair", "boxes", "tv", "stroller", "phone", "shelf", "balloon", "sign_park",
 	"wetsign", "wetsign", "wetsign", "wheelchair", "hydrant", "trashbag", "tyre", "utilitybox", "crate", "chair"]
@@ -23,6 +25,16 @@ static func generate(seed: int) -> Array:
 	var l1 := layer1(seed, l0)
 	print("Комплекс сгенерирован за %d мс" % (Time.get_ticks_msec() - t0))
 	return [l0, l1]
+
+
+static var _pt := 0
+
+
+static func _prof(what: String) -> void:
+	var now := Time.get_ticks_msec()
+	if OS.get_cmdline_user_args().has("--gen_prof"):
+		print("GEN %5d ms  %s" % [now - _pt, what])
+	_pt = now
 
 
 static func _centered(v: int) -> int:
@@ -55,7 +67,9 @@ static func layer0(seed: int) -> LayerData:
 			elif n > 0.45:
 				L.zone[i] = LD.Z_OLD
 	L.divide(0, 0, LD.N, LD.N, 0.25)
+	_prof("L.divide(0, 0, LD.N, LD.N, 0.25)")
 	L.open_random_walls(0.05)
+	_prof("L.open_random_walls(0.05)")
 	# старт: спокойная освещённая зона
 	for z in range(-12, 13):
 		for x in range(-12, 13):
@@ -97,14 +111,18 @@ static func layer0(seed: int) -> LayerData:
 		var h: int = pe[4]
 		var ps := L.pick_spot(0, 0, int(pe[1]), int(pe[2]), w, h)
 		_park_room(L, ps.x, ps.y, w, h, String(pe[0]))
+	Rooms.place_all(L, 0, Vector2i(0, 0))
+	_prof("Rooms.place_all(L, 0, Vector2i(0, 0))")
 
 	L.place_lights(0.0)
+	_prof("L.place_lights(0.0)")
 	for z in range(-10, 11):
 		for x in range(-10, 11):
 			var i := LD.idx(x, z)
 			if L.light[i] == LD.L_DEAD or L.light[i] == LD.L_HOLE or L.light[i] == LD.L_FLICK:
 				L.light[i] = LD.L_ON
 	L.fix_connectivity(0, 0)
+	_prof("L.fix_connectivity(0, 0)")
 
 	# --- кабели Async: от станции к лагерю, к комнате-яме B и к дальним концам
 	var ox: int = int(L.places["outpost_cell"].x)
@@ -117,8 +135,13 @@ static func layer0(seed: int) -> LayerData:
 		var ez := oz + int(sin(a) * r2)
 		ends.append(L.find_cell_near(ex, ez, 12, func(x: int, z: int) -> bool: return L.is_plain(x, z)))
 	L.lay_cables(ox, oz, ends)
+	_prof("L.lay_cables(ox, oz, ends)")
 	_cable_tags(L)
+	_prof("_cable_tags(L)")
 	_scatter(L, 0)
+	_prof("_scatter(L, 0)")
+	Rooms.sprinkle(L, 0, Vector2i(0, 0))
+	_prof("Rooms.sprinkle(L, 0, Vector2i(0, 0))")
 	return L
 
 
@@ -524,6 +547,7 @@ static func layer1(seed: int, l0: LayerData) -> LayerData:
 			else:
 				L.zone[i] = LD.Z_DARK
 	L.divide(0, 0, LD.N, LD.N, 0.18)
+	_prof("L.divide(0, 0, LD.N, LD.N, 0.18)")
 	L.open_random_walls(0.04)
 	# под ямами верхнего слоя — шахты и места падения
 	var pits: Array = l0.places.get("pits", [])
@@ -595,8 +619,11 @@ static func layer1(seed: int, l0: LayerData) -> LayerData:
 	for k in 3:
 		var ss := L.pick_spot(first.x, first.y, 20 + k * 12, 40 + k * 15, 2, 2)
 		L.places["stalker_%d" % k] = Vector3(LD.cell_center(ss.x, ss.y).x, L.floor_y, LD.cell_center(ss.x, ss.y).y)
+	Rooms.place_all(L, 1, first)
+	_prof("Rooms.place_all(L, 1, first)")
 	L.place_lights(0.0)
 	L.fix_connectivity(first.x, first.y)
+	_prof("L.fix_connectivity(first.x, first.y)")
 	# кабели от лестниц
 	for k in 2:
 		var key2 := "ladder_cell_%d" % k
@@ -611,6 +638,9 @@ static func layer1(seed: int, l0: LayerData) -> LayerData:
 		L.lay_cables(lc.x, lc.y, ends)
 	_cable_tags(L)
 	_scatter(L, 1)
+	_prof("_scatter(L, 1)")
+	Rooms.sprinkle(L, 1, first)
+	_prof("Rooms.sprinkle(L, 1, first)")
 	return L
 
 

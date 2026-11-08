@@ -221,4 +221,83 @@ const T := {
 		"..."],
 	"sub.hatch6": ["Я отсюда не выйду.",
 		"I'm not getting out of here."],
+
+	# ---------------------------------------------------------------- странные комнаты
+	"ui.door": ["[E] Открыть дверь", "[E] Open the door"],
+	"ui.phone": ["[E] Взять трубку", "[E] Pick up the phone"],
+	"ui.who_phone": ["ГОЛОС В ТРУБКЕ", "VOICE ON THE LINE"],
+	"sub.phone": ["Алло?.. Алло, это ты? Мы тебя везде ищем... Почему ты молчишь? Скажи, где ты... Ты слышишь гул? У нас в трубке тоже гудит.",
+		"Hello?.. Hello, is that you? We've been looking everywhere for you... Why aren't you saying anything? Tell me where you are... Do you hear that hum? It's humming on our end too."],
+	"sign.exit": ["ВЫХОД", "EXIT"],
+	"sign.dont_touch": ["ASYNC — НЕ ТРОГАТЬ", "ASYNC — DO NOT TOUCH"],
+	"graf.crawl": ["ПОЛЗИ. ОНО СЮДА НЕ ПРОЛЕЗЕТ", "CRAWL. IT CAN'T FIT IN HERE"],
+	"graf.doors": ["ЗА НИМИ СТЕНА. ЗА ВСЕМИ", "THERE'S A WALL BEHIND THEM. ALL OF THEM"],
+	"graf.repeat1": ["ТЫ УЖЕ БЫЛ ЗДЕСЬ", "YOU'VE BEEN HERE BEFORE"],
+	"graf.repeat3": ["ТЫ УЖЕ БЫЛ ЗДЕСЬ. ДВАЖДЫ", "YOU'VE BEEN HERE BEFORE. TWICE"],
+	"graf.tally2": ["||||| ||||| ||||| ||||| ||||| ||||| |||", "||||| ||||| ||||| ||||| ||||| ||||| |||"],
+	"graf.home": ["ЭТО МОЙ ДОМ ТЕПЕРЬ", "THIS IS MY HOME NOW"],
+	"class.board1": ["14 ИЮЛЯ
+ТЕМА: ГДЕ ТЫ
+
+1. Не отвечай голосу
+2. Не бегай
+3. Не бегай
+4. Не бегай", "JULY 14
+TOPIC: WHERE ARE YOU
+
+1. Don't answer the voice
+2. Don't run
+3. Don't run
+4. Don't run"],
+	"class.board2": ["ДОМАШНЕЕ ЗАДАНИЕ:
+вспомнить, какое небо", "HOMEWORK:
+remember what the sky looks like"],
+	"class.board3": ["2 + 2 = коридор
+коридор + коридор = коридор", "2 + 2 = hallway
+hallway + hallway = hallway"],
+	"store.s1": ["ВСЁ ДОЛЖНО УЙТИ", "EVERYTHING MUST GO"],
+	"store.s2": ["РАСПРОДАЖА", "CLEARANCE SALE"],
+	"store.s3": ["СКИДКИ 70%", "70% OFF"],
+	"note.r01": ["Я живу здесь уже, кажется, третий месяц. Нашёл склад с консервами — Async оставили. Ставлю будильник, чтобы помнить, что существует утро.
+
+Матрас тёплый. Это хорошо или плохо?
+
+Если найдёшь это — консервы бери. Мне уже не нужно.",
+		"I think I've lived here for three months now. Found a stash of canned food — Async left it. I set the alarm clock so I remember mornings exist.
+
+The mattress is warm. Is that good or bad?
+
+If you find this — take the cans. I don't need them anymore."],
+	"note.r02": ["Внизу тише. Свет почти не горит, но здесь нет тех, кто ходит крест-накрест. Пока нет.
+
+Я перестал считать дни. Посчитал зарубки — сорок одна. Значит, я спал сорок один раз. Или сорок один раз терял сознание.",
+		"It's quieter down here. The lights barely work, but there's none of the ones that walk cross-legged. Not yet.
+
+I stopped counting days. Counted the marks — forty-one. So I've slept forty-one times. Or passed out forty-one times."],
+	"note.a_survey": ["ASYNC — ОБСЛЕДОВАНИЕ ОСВЕЩЕНИЯ И ПЛИТ (ПОВТОРНОЕ)
+
+Снят светильник: стальной корпус, лампы близки к T12, пропорции слегка нарушены. Питания нет. Светильник продолжал светиться ещё 40 минут после снятия.
+
+Потолочная плита: минеральное волокно. Над плитой — такие же плиты.
+
+Рекомендация: не снимать светильники в секторах с людьми.",
+		"ASYNC — LIGHTING AND TILE SURVEY (FOLLOW-UP)
+
+Fixture removed: steel housing, tubes close to T12, proportions slightly off. No power supply. The fixture kept glowing for 40 minutes after removal.
+
+Ceiling tile: mineral fibre. Above the tile — more tiles.
+
+Recommendation: do not remove fixtures in occupied sectors."],
+	"tv.ad1": ["СТРОИМ БУДУЩЕЕ ПРОСТОРА", "BUILDING THE FUTURE OF SPACE"],
+	"tv.ad2": ["Место есть для каждого", "There is room for everyone"],
+	"tv.ad3": ["A-SPACE: ЖИВИТЕ ПРОСТОРНО", "A-SPACE: LIVE SPACIOUSLY"],
+	"tv.ad4": ["Тёплый свет. Мягкий пол.", "Warm light. Soft floors."],
+	"tv.ad5": ["Скоро в вашем районе.", "Coming soon to your area."],
+	"tv.news1": ["ПРОПАВШИЕ В ЗАЛИВЕ: УЖЕ 112", "BAY AREA MISSING: NOW 112"],
+	"tv.news2": ["...полиция просит сообщать обо всех случаях исчезновений в парках и подвалах... землетрясение 17 октября... департамент энергетики отказался от комментариев...",
+		"...police ask residents to report all disappearances in parks and basements... October 17 earthquake... the Department of Energy declined to comment..."],
+	"tv.bars": ["ТЕХНИЧЕСКИЙ ПЕРЕРЫВ", "PLEASE STAND BY"],
+	"tv.exp": ["группа держится кабеля", "team stays on the cable"],
+	"tv.weather": ["ПОГОДА", "WEATHER"],
+	"tv.sunny": ["ЯСНО", "SUNNY"],
 }

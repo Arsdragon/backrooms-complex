@@ -5,7 +5,7 @@ extends RefCounted
 const LD := preload("res://src/world/layer_data.gd")
 
 
-static func find(L: LayerData, from: Vector2i, to: Vector2i, max_nodes := 2500) -> Array:
+static func find(L: LayerData, from: Vector2i, to: Vector2i, max_nodes := 2500, tall := false) -> Array:
 	if from == to:
 		return [to]
 	var open := [from]
@@ -40,6 +40,10 @@ static func find(L: LayerData, from: Vector2i, to: Vector2i, max_nodes := 2500) 
 				continue
 			var o: Vector2i = LD.DIRS[d]
 			var nb := cur + o
+			if tall:
+				var nh := L.ceil_h[LD.idx(nb.x, nb.y)]
+				if nh > 0 and nh < 22:
+					continue
 			if closed.has(nb):
 				continue
 			var cost := 10

@@ -34,7 +34,10 @@ var _drive_t := 0.0
 const CAST := {"jogger": "Sports_Male_04", "mother": "Female_Adult_02", "kid": "Male_Child_01", "oldman": "Male_Adult_03",
 	"couple": "Male_Adult_06", "suit": "Business_Male_02", "vendor": "Chef_Female_01", "teen": "Male_Adult_09",
 	"worker": "Business_Male_06", "explorer": "Fire_Male_01", "player": "Male_Adult_05", "civ_a": "Female_Adult_04",
-	"civ_b": "Female_Adult_10", "civ_c": "Female_Adult_12", "civ_d": "Male_Adult_01"}
+	"civ_b": "Female_Adult_10", "civ_c": "Female_Adult_12", "civ_d": "Male_Adult_01",
+	"civ_e": "Business_Female_01", "civ_f": "Female_Adult_01", "civ_g": "Female_Adult_06", "civ_h": "Male_Adult_13",
+	"civ_i": "Male_Adult_16", "civ_j": "Medical_Male_01", "civ_k": "Police_Male_01", "civ_l": "Female_Child_01",
+	"civ_m": "Male_Child_02", "civ_n": "Gardener_Male_01", "civ_o": "Security_Male_01", "civ_p": "Male_Adult_14"}
 # наш сустав -> кость Biped. Наши «l» стоят на −X, это правая сторона персонажа (R)
 const BONES := {"pelvis": "Bip01 Pelvis", "spine": "Bip01 Spine", "chest": "Bip01 Spine2", "neck": "Bip01 Neck", "head": "Bip01 Head",
 	"sh_l": "Bip01 R UpperArm", "el_l": "Bip01 R Forearm", "wr_l": "Bip01 R Hand",

@@ -204,6 +204,8 @@ func start_complex(lower := false, from_fall := false) -> void:
 		cx.player.set_look(yaw, float(Cfg.arg("pitch")))
 	if Cfg.has_arg("vhs"):
 		Cfg.vhs = float(Cfg.arg("vhs"))
+	if Cfg.has_arg("tour"):
+		cx._tour(Cfg.arg("tour"))
 	main.osd.shown = true
 	main.osd.date_key = "osd.date_park"
 	main.osd.date_reset = true

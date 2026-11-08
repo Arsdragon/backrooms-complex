@@ -463,7 +463,7 @@ func _wander(pl: Player, rad := 10) -> void:
 		goal = pc + Vector2i(randi_range(-rad, rad), randi_range(-rad, rad))
 	else:
 		goal = me + Vector2i(randi_range(-rad, rad), randi_range(-rad, rad))
-	path = Pathfind.find(L, me, goal, 1500)
+	path = Pathfind.find(L, me, goal, 1500, true)
 	path_i = 1
 
 
@@ -479,7 +479,7 @@ func _move(dt: float, pl: Player) -> void:
 			away.y = 0
 			away = away.normalized() * 40.0
 			goal = cx.cell_of(global_position + away)
-		path = Pathfind.find(L, me, goal, 2000 if state == S.CHASE else 1200)
+		path = Pathfind.find(L, me, goal, 2000 if state == S.CHASE else 1200, true)
 		path_i = 1
 	var want := Vector3.ZERO
 	if state == S.CHASE and cx.line_clear(global_position + Vector3(0, 1, 0), pl.global_position + Vector3(0, 1, 0)) and global_position.distance_to(pl.global_position) < 7.0:

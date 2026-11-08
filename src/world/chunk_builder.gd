@@ -30,7 +30,11 @@ const M_GLASS := 19
 const M_CABLE := 20
 const M_RED_LAMP := 21
 const M_CARPET_WET := 22
-const M_COUNT := 23
+const M_WALL_PAINT := 23
+const M_WALL_SCHOOL := 24
+const M_LINO := 25
+const M_WATER := 26
+const M_COUNT := 27
 
 const T := 0.1          # половина толщины стены
 const DOOR_W := 0.55    # половина ширины узкого проёма
@@ -107,6 +111,8 @@ func _gather_lights() -> void:
 				h = 2.7
 			var c := L.cell_center(x, z)
 			var y := fy + h - 0.05
+			if D.zone[L.idx(x, z)] == L.Z_FLIP:
+				y = fy + 0.06
 			var I := 1.0
 			var grp := -1
 			match k:
@@ -303,6 +309,8 @@ func _wall_mat(zn: int) -> int:
 		L.Z_TILE: return M_WALL_TILE
 		L.Z_HOUSE: return M_WALL_HOUSE
 		L.Z_STRETCH: return M_WALL_STRETCH
+		L.Z_STORE: return M_WALL_PAINT
+		L.Z_CLASS: return M_WALL_SCHOOL
 	return M_WALL_Y
 
 
@@ -312,6 +320,7 @@ func _floor_mat(zn: int, x: int, z: int) -> int:
 		L.Z_CONCRETE, L.Z_CELLAR: return M_FLOOR_CONC
 		L.Z_TILE: return M_FLOOR_TILE
 		L.Z_HOUSE: return M_FLOOR_WOOD
+		L.Z_STORE, L.Z_CLASS: return M_LINO
 		L.Z_DARK:
 			return M_CARPET_WET if (x * 31 + z * 17) % 5 < 2 else M_CARPET
 	return M_CARPET
@@ -351,19 +360,37 @@ func _cell(x: int, z: int) -> void:
 			if walls[d]:
 				a *= 0.55 + 0.45 * smoothstep(0.0, 0.9, float(dxs[d]))
 		return a
+	var flip := zn == L.Z_FLIP
+	var aofc := func(p: Vector3) -> float:
+		return 0.35 + 0.65 * float(aof.call(p))
 	if f == L.F_FLOOR:
-		quad(_floor_mat(zn, x, z), Vector3(X0, fy, Z0), Vector3(X1, fy, Z0), Vector3(X1, fy, Z1), Vector3(X0, fy, Z1),
-			Vector3.UP, 3, 3, cell, _uv_xz, aof)
+		if flip:
+			# перевёртыш: на полу — потолочные плиты и лампы
+			quad(M_CEIL_TILE, Vector3(X0, fy, Z0), Vector3(X1, fy, Z0), Vector3(X1, fy, Z1), Vector3(X0, fy, Z1),
+				Vector3.UP, 3, 3, cell, _uv_xz, aofc, true)
+			_fixture(x, z, fy, zn, true)
+		else:
+			quad(_floor_mat(zn, x, z), Vector3(X0, fy, Z0), Vector3(X1, fy, Z0), Vector3(X1, fy, Z1), Vector3(X0, fy, Z1),
+				Vector3.UP, 3, 3, cell, _uv_xz, aof)
+		if D.water[i] > 0:
+			var wy := fy + 0.055
+			quad(M_WATER, Vector3(X0, wy, Z0), Vector3(X1, wy, Z0), Vector3(X1, wy, Z1), Vector3(X0, wy, Z1),
+				Vector3.UP, 2, 2, cell, _uv_xz, func(_p: Vector3) -> float: return 1.0)
 	elif f == L.F_PIT:
 		_pit(x, z)
 	# потолок
 	if h > 0.01:
 		var cy := fy + h
-		var aofc := func(p: Vector3) -> float:
-			return 0.35 + 0.65 * float(aof.call(p))
-		quad(_ceil_mat(zn), Vector3(X0, cy, Z0), Vector3(X1, cy, Z0), Vector3(X1, cy, Z1), Vector3(X0, cy, Z1),
-			Vector3.DOWN, 3, 3, cell, _uv_xz, aofc, true)
-		_fixture(x, z, cy, zn)
+		if flip:
+			quad(M_CARPET, Vector3(X0, cy, Z0), Vector3(X1, cy, Z0), Vector3(X1, cy, Z1), Vector3(X0, cy, Z1),
+				Vector3.DOWN, 3, 3, cell, _uv_xz, aof)
+		else:
+			quad(_ceil_mat(zn), Vector3(X0, cy, Z0), Vector3(X1, cy, Z0), Vector3(X1, cy, Z1), Vector3(X0, cy, Z1),
+				Vector3.DOWN, 3, 3, cell, _uv_xz, aofc, true)
+			_fixture(x, z, cy, zn)
+		if h < 2.2:
+			# низкий потолок — твёрдый (пролезть можно только пригнувшись)
+			boxes.append([Vector3(X0 + L.C * 0.5, cy + 0.2, Z0 + L.C * 0.5), Vector3(L.C * 0.5, 0.2, L.C * 0.5)])
 	else:
 		_shaft(x, z)
 	# ступенька потолка между клетками разной высоты (открытые рёбра)
@@ -380,8 +407,9 @@ func _cell(x: int, z: int) -> void:
 			continue
 		var lo := minf(h, h2)
 		var hi := maxf(h, h2)
-		var low_cell := cell if h < h2 else Vector2i(x + o.x, z + o.y)
-		var nrm := Vector3(-o.x, 0, -o.y) if h < h2 else Vector3(o.x, 0, o.y)
+		# ступенька видна из клетки с ВЫСОКИМ потолком — туда и смотрит
+		var low_cell := Vector2i(x + o.x, z + o.y) if h < h2 else cell
+		var nrm := Vector3(o.x, 0, o.y) if h < h2 else Vector3(-o.x, 0, -o.y)
 		var zl := _wall_mat(D.zone[L.idx(low_cell.x, low_cell.y)])
 		if d == 0:
 			quad(zl, Vector3(X1, fy + lo, Z0), Vector3(X1, fy + lo, Z1), Vector3(X1, fy + hi, Z1), Vector3(X1, fy + hi, Z0),
@@ -391,12 +419,13 @@ func _cell(x: int, z: int) -> void:
 				nrm, 3, 2, low_cell, func(p: Vector3) -> Vector2: return Vector2(p.x, p.y), func(_p: Vector3) -> float: return 0.9)
 
 
-func _fixture(x: int, z: int, cy: float, zn: int) -> void:
+func _fixture(x: int, z: int, cy: float, zn: int, up := false) -> void:
 	var k := D.light[L.idx(x, z)]
 	if k == L.L_NONE or k == L.L_ASYNC:
 		return
 	var c := L.cell_center(x, z)
-	var y := cy - 0.012
+	var y := cy - 0.012 if not up else cy + 0.012
+	var fn := Vector3.UP if up else Vector3.DOWN
 	var hw := 0.3
 	var hd := 0.6
 	if zn == L.Z_HOUSE or k == L.L_BULB or k == L.L_RED or k == L.L_GREEN:
@@ -407,7 +436,7 @@ func _fixture(x: int, z: int, cy: float, zn: int) -> void:
 		mat = M_FIXTURE_DEAD
 	elif k == L.L_HOLE:
 		mat = M_HOLE
-		y = cy - 0.004
+		y = cy - 0.004 if not up else cy + 0.004
 	elif k == L.L_RED:
 		mat = M_RED_LAMP
 	var group := 0.0
@@ -416,6 +445,9 @@ func _fixture(x: int, z: int, cy: float, zn: int) -> void:
 	elif k == L.L_GREEN:
 		group = 7.0 / 8.0
 	var col := Color(1.0 if (k == L.L_ON or k == L.L_BULB) else 0.0, 1.0 if (k == L.L_FLICK or k == L.L_GREEN) else 0.0, 1.0 if k == L.L_RED else 0.0, group)
+	if k == L.L_DEAD:
+		# погасший светильник освещён соседними лампами, как потолок
+		col = light_at(Vector3(c.x, y - 0.05 * fn.y, c.y), fn, false, Vector2i(x, z), true)
 	var s := _s(mat)
 	var p0 := Vector3(c.x - hw, y, c.y - hd)
 	var p1 := Vector3(c.x + hw, y, c.y - hd)
@@ -423,7 +455,7 @@ func _fixture(x: int, z: int, cy: float, zn: int) -> void:
 	var p3 := Vector3(c.x - hw, y, c.y + hd)
 	var pts := [p0, p1, p2, p0, p2, p3]
 	var uvs := [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 0), Vector2(1, 1), Vector2(0, 1)]
-	var flip := (p1 - p0).cross(p3 - p0).dot(Vector3.DOWN) * WIND < 0.0
+	var flip := (p1 - p0).cross(p3 - p0).dot(fn) * WIND < 0.0
 	if flip:
 		pts = [p0, p2, p1, p0, p3, p2]
 		uvs = [Vector2(0, 0), Vector2(1, 1), Vector2(1, 0), Vector2(0, 0), Vector2(0, 1), Vector2(1, 1)]
@@ -434,7 +466,7 @@ func _fixture(x: int, z: int, cy: float, zn: int) -> void:
 	var u2: PackedVector2Array = s.uv2
 	for t in 6:
 		vs.append(pts[t])
-		ns.append(Vector3.DOWN)
+		ns.append(fn)
 		cs.append(col)
 		us.append(uvs[t])
 		u2.append(Vector2(1, 0))
@@ -604,10 +636,12 @@ func _edges(x: int, z: int) -> void:
 				else:
 					uvf = func(p: Vector3) -> Vector2: return Vector2(p.x, p.y)
 				quad(_wall_mat(zs), p0, p1, p2, p3, n, 3, nv, cell, uvf, aof)
-				if _has_base(zs) and y0 <= fy + 0.01 and y1 > fy + 0.2:
+				var bflip := zs == L.Z_FLIP
+				if _has_base(zs) and ((not bflip and y0 <= fy + 0.01 and y1 > fy + 0.2) or (bflip and y1 >= ceil_y - 0.01)):
 					var bo := n * (T + 0.012)
-					var q0 := Vector3(a.x, fy, a.z) + bo
-					var q1 := Vector3(b.x, fy, b.z) + bo
+					var by := ceil_y - 0.1 if bflip else fy
+					var q0 := Vector3(a.x, by, a.z) + bo
+					var q1 := Vector3(b.x, by, b.z) + bo
 					quad(M_BASE, q0, q1, q1 + Vector3(0, 0.1, 0), q0 + Vector3(0, 0.1, 0), n, 2, 1, cell, uvf, func(_p: Vector3) -> float: return 0.8)
 					quad(M_BASE, q0 + Vector3(0, 0.1, 0), q1 + Vector3(0, 0.1, 0), q1 + Vector3(0, 0.1, 0) - n * 0.012, q0 + Vector3(0, 0.1, 0) - n * 0.012,
 						Vector3.UP, 1, 1, cell, uvf, func(_p: Vector3) -> float: return 0.9)

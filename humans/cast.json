@@ -13,5 +13,18 @@
  "player": "Male_Adult_05",
  "civ_a": "Female_Adult_04",
  "civ_b": "Male_Adult_01",
- "civ_c": "Female_Adult_12"
+ "civ_c": "Female_Adult_12",
+ "civ_d": "Male_Adult_01",
+ "civ_e": "Business_Female_01",
+ "civ_f": "Female_Adult_01",
+ "civ_g": "Female_Adult_06",
+ "civ_h": "Male_Adult_13",
+ "civ_i": "Male_Adult_16",
+ "civ_j": "Medical_Male_01",
+ "civ_k": "Police_Male_01",
+ "civ_l": "Female_Child_01",
+ "civ_m": "Male_Child_02",
+ "civ_n": "Gardener_Male_01",
+ "civ_o": "Security_Male_01",
+ "civ_p": "Male_Adult_14"
 }

@@ -306,7 +306,10 @@ func surface_at(p: Vector3) -> String:
 	var x := int(floor(p.x / LD.C))
 	var z := int(floor(p.z / LD.C))
 	var i := LD.idx(x, z)
+	if L.water[i] > 0:
+		return "wet"
 	match L.zone[i]:
+		LD.Z_STORE, LD.Z_CLASS: return "tile"
 		LD.Z_CONCRETE, LD.Z_CELLAR: return "concrete"
 		LD.Z_TILE: return "tile"
 		LD.Z_HOUSE: return "wood"
@@ -608,3 +611,34 @@ func _physics_process(_dt: float) -> void:
 		var c := cell_of(player.global_position)
 		player.global_position = Vector3((c.x + 0.5) * LD.C, layer().floor_y + 1.0, (c.y + 0.5) * LD.C)
 		player.velocity = Vector3.ZERO
+
+
+## Отладка: --tour=<папка> — обойти все «странные комнаты» и снять каждую
+func _tour(dir: String) -> void:
+	await get_tree().create_timer(1.0).timeout
+	var L := layer()
+	var keys := []
+	for k in L.places.keys():
+		if String(k).begins_with("room_"):
+			keys.append(k)
+	keys.sort()
+	if Cfg.has_arg("only"):
+		keys = keys.filter(func(k: Variant) -> bool: return String(k).contains(Cfg.arg("only")))
+	player.bot = false
+	for k in keys:
+		var p: Vector3 = L.places[k]
+		p = wrap_near(p, player.global_position)
+		for view in 2:
+			var off := Vector3(0, 0.1, 3.0) if view == 0 else Vector3(0, 0.1, -3.0)
+			player.global_position = p + off
+			player.velocity = Vector3.ZERO
+			player.set_look(0.0 if view == 0 else PI, -0.08)
+			_sync_load(player.global_position, 1)
+			gain = 1.0
+			for f in 30:
+				await get_tree().process_frame
+			await get_tree().create_timer(2.0).timeout
+			await RenderingServer.frame_post_draw
+			Game.main.screenshot(dir + "/" + String(k) + "_" + str(view) + ".png")
+		print("TOUR ", k)
+	get_tree().quit()
