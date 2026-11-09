@@ -302,9 +302,9 @@ func _build_rooms() -> void:
 	t.position = Vector2(60, 30)
 	rooms_box.add_child(t)
 	var cols := []
-	for c in 4:
+	for c in 5:
 		var v := VBoxContainer.new()
-		v.position = Vector2(50 + c * 305, 110)
+		v.position = Vector2(36 + c * 248, 100)
 		v.add_theme_constant_override("separation", 1)
 		rooms_box.add_child(v)
 		cols.append(v)
@@ -314,8 +314,8 @@ func _build_rooms() -> void:
 		var row: Array = e
 		var typ: String = row[0]
 		var lower: bool = int(row[1]) == 1
-		var b := _btn("room." + typ, func() -> void: Game.poly_complex(lower, "room_%s_0" % typ), 20)
-		(cols[mini(i / 9, 3)] as VBoxContainer).add_child(b)
+		var b := _btn("room." + typ, func() -> void: Game.poly_complex(lower, "room_%s_0" % typ), 17)
+		(cols[mini(i / 11, 4)] as VBoxContainer).add_child(b)
 		i += 1
 	var back := _btn("ui.back", func() -> void: show_polygon(), 24)
 	back.position = Vector2(56, 640)

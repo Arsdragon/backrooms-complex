@@ -19,7 +19,7 @@ LOOPS = {"hum_fluor", "room_tone", "null_hum", "park_ambience", "wind_trees", "w
          "threshold_hum", "tv_static", "fridge_hum", "radio_static", "tape_whir", "sea_waves", "wind_open", "wind_fall",
          "upstairs_tv", "crickets", "death_drone", "birds_wrong", "jingle_wrong", "music_box", "engine_tick",
          "vending_hum", "speaker_hiss", "tv_news", "tv_jingle", "tv_home", "clock_tick", "vent_air", "store_muzak", "water_amb",
-         "heartbeat", "under_rumble", "space_tone"}
+         "heartbeat", "under_rumble", "space_tone", "washer", "fan_big", "rain_room"}
 na = 0
 for f in glob.glob(os.path.join(ROOT, "audio", "*.ogg.import")):
     name = os.path.basename(f)[:-len(".ogg.import")]

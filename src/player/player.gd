@@ -287,7 +287,7 @@ func _footstep() -> void:
 	elif crouching:
 		vol = -19.0
 		radius = 2.5
-	Snd.play("step_" + surf, vol, randf_range(0.92, 1.08), "Sfx")
+	Snd.play("step_" + surf, vol, randf_range(0.92, 1.08), "World")
 	if noise_fn.is_valid():
 		noise_fn.call(global_position, radius)
 

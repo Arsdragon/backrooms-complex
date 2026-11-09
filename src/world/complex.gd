@@ -41,6 +41,12 @@ var _power_t := 0.0             # до следующего события с п
 var _power_ev := ""             # "", "dip", "out", "back"
 var _power_left := 0.0
 var _power_age := 0.0
+var _space_t := 0.0             # пересчёт «размера пространства» для эха
+var _room := 0.5
+var _wet := 0.15
+var _room_target := 0.5
+var _wet_target := 0.15
+var _amb_t := 30.0              # до следующего далёкого звука
 
 
 func _ready() -> void:
@@ -402,6 +408,13 @@ func _process(dt: float) -> void:
 	if not demo:
 		_hurt_tick(dt)
 		_update_power(dt)
+		_update_space(dt)
+		_ambient_tick(dt)
+	elif demo_cam != null:
+		# меню: камера медленно осматривается, чуть «дышит»
+		demo_cam.rotation.y += sin(t * 0.07) * dt * 0.05
+		demo_cam.rotation.x = sin(t * 0.13) * 0.035 - 0.02
+		demo_cam.rotation.z = sin(t * 0.09) * 0.012
 	var fp := _focus_pos()
 	_stream(fp)
 	_update_flicker(dt)
@@ -861,3 +874,60 @@ func _update_power(dt: float) -> void:
 	RenderingServer.global_shader_parameter_set("g_power", power)
 	if Cfg.has_arg("blackout") and Engine.get_process_frames() % 30 == 0:
 		print("POWER t=%.1f ev=%s p=%.2f left=%.1f" % [Game.run_time, _power_ev, power, _power_left])
+
+
+# ------------------------------------------------------------ звук пространства
+
+## Эхо по размеру места: сколько клеток вокруг доступно за несколько шагов и как высоко потолок
+func _update_space(dt: float) -> void:
+	_space_t -= dt
+	if _space_t <= 0.0 and player != null:
+		_space_t = 0.4
+		var L := layer()
+		var pc := cell_of(player.global_position)
+		var seen := {pc: 0}
+		var q := [pc]
+		var head := 0
+		var hsum := 0.0
+		while head < q.size() and q.size() < 260:
+			var c: Vector2i = q[head]
+			head += 1
+			hsum += L.height_m(c.x, c.y) - L.fh[LD.idx(c.x, c.y)] * 0.1
+			var dd: int = seen[c]
+			if dd >= 7:
+				continue
+			for d in 4:
+				if not LD.edge_passable(L.edge(c.x, c.y, d)) and L.edge(c.x, c.y, d) != LD.E_WINDOW:
+					continue
+				var nb: Vector2i = c + LD.DIRS[d]
+				if seen.has(nb) or L.flo[LD.idx(nb.x, nb.y)] == LD.F_SOLID:
+					continue
+				seen[nb] = dd + 1
+				q.append(nb)
+		var n := float(q.size())
+		var hh := hsum / maxf(1.0, float(head))
+		_room_target = clampf(0.12 + n / 150.0 + (hh - 3.0) * 0.07, 0.08, 0.97)
+		_wet_target = clampf(0.05 + n / 520.0 + (hh - 3.0) * 0.045, 0.04, 0.45)
+		if hh < 2.2:
+			_room_target = 0.06
+			_wet_target = 0.04
+	_room = move_toward(_room, _room_target, dt * 0.6)
+	_wet = move_toward(_wet, _wet_target, dt * 0.4)
+	Snd.set_reverb(_room, _wet)
+
+
+## Далёкие звуки Комплекса: где-то хлопнула дверь, стук, шаги, звонок, лифт — редко и тихо
+const FAR_SOUNDS := ["door_open", "knock", "footsteps_above", "impact_far", "phone_ring", "elev_ding", "pipe_knock", "muffled_voices", "lamp_start"]
+
+
+func _ambient_tick(dt: float) -> void:
+	_amb_t -= dt
+	if _amb_t > 0.0 or player == null or ended:
+		return
+	_amb_t = randf_range(28.0, 70.0)
+	var a := randf() * TAU
+	var p := player.global_position + Vector3(cos(a), 0, sin(a)) * randf_range(16.0, 30.0) + Vector3(0, 1.4, 0)
+	var nm: String = FAR_SOUNDS[randi() % FAR_SOUNDS.size()]
+	if cur == 1 and randf() < 0.3:
+		nm = "muffled_voices"
+	Snd.play_at(nm, p, self, randf_range(-14.0, -8.0), randf_range(0.85, 1.0), 45.0, 6.0)

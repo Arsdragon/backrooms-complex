@@ -42,6 +42,20 @@ static func spawn(cx: Node3D, d: Dictionary, rng: RandomNumberGenerator, layer: 
 		"drag": return drag(rng)
 		"lone_door": return lone_door(rng)
 		"lost_camp": return lost_camp(cx, rng)
+		"text": return text(d)
+		"spin": return spin(d)
+		"cake": return cake(rng)
+		"projector": return projector(d)
+		"elevator": return elevator(d)
+		"mannequin": return mannequin(d, rng)
+		"fridge": return fridge()
+		"fan_big": return fan_big()
+		"washer": return washer(d)
+		"pedestal": return pedestal(d)
+		"ropes": return ropes(d)
+		"rain": return rain(d)
+		"ceil_stain": return ceil_stain(d, rng)
+		"streak": return streak(d, rng)
 	return null
 
 
@@ -780,4 +794,326 @@ static func lost_camp(cx: Node3D, rng: RandomNumberGenerator) -> Node3D:
 	var lb := P.label("|||| |||| |||| |||| |||| ||", P.font_hand(), 0.0035, Color(0.12, 0.1, 0.08))
 	lb.position = Vector3(0, 0.75, -1.08)
 	n.add_child(lb)
+	return n
+
+
+# ------------------------------------------------------------ обжитые и странные места
+
+## Надпись/табличка: ключ текста, цвет, размер; plate — подложка
+static func text(d: Dictionary) -> Node3D:
+	var n := Node3D.new()
+	if bool(d.get("plate", false)):
+		var ps: Vector2 = d.get("plate_size", Vector2(0.9, 0.35))
+		var pc: Color = d.get("plate_color", Color(0.05, 0.05, 0.05))
+		P.box(n, Vector3(ps.x, ps.y, 0.03), Vector3(0, 0, 0.015), Mats.col(pc, "metal", 0.2))
+	var col: Color = d.get("color", Color(0.08, 0.08, 0.1))
+	var lb := P.label(Loc.t(String(d.get("key", "sign.exit"))), P.font_hand() if bool(d.get("hand", false)) else P.font_sign(), float(d.get("px", 0.004)), col)
+	lb.position = Vector3(0, 0, 0.036)
+	n.add_child(lb)
+	return n
+
+
+class Spinner extends Node3D:
+	var speed := 1.0
+	var axis := Vector3.UP
+
+	func _process(dt: float) -> void:
+		rotate_object_local(axis, speed * dt)
+
+
+## Модель, которая медленно крутится (потолочный вентилятор)
+static func spin(d: Dictionary) -> Node3D:
+	var n := Node3D.new()
+	var id := String(d.get("id", "ceiling_fan"))
+	var sp := Spinner.new()
+	sp.speed = float(d.get("speed", 1.5))
+	n.add_child(sp)
+	if bool(d.get("on_ceiling", false)):
+		var bb := Models.aabb(id)
+		sp.position.y = float(d.get("ceil", 2.7)) - bb.size.y - bb.position.y
+	P.model(sp, id, Vector3.ZERO, 0.0, 1.0, false)
+	return n
+
+
+## Торт со свечами на круглом столе, колпаки, тарелки
+static func cake(rng: RandomNumberGenerator) -> Node3D:
+	var n := Node3D.new()
+	P.model(n, "round_wooden_table_01")
+	var top := Models.aabb("round_wooden_table_01").size.y
+	if top < 0.3:
+		top = 0.75
+	P.cyl(n, 0.17, 0.17, 0.13, Vector3(0, top + 0.065, 0), Mats.col(Color(0.96, 0.92, 0.86), "fabric", 0.6))
+	P.cyl(n, 0.175, 0.175, 0.025, Vector3(0, top + 0.14, 0), Mats.col(Color(0.92, 0.48, 0.62), "fabric", 0.5))
+	for k in 5:
+		var a := k * TAU / 5.0
+		P.cyl(n, 0.006, 0.006, 0.07, Vector3(cos(a) * 0.1, top + 0.19, sin(a) * 0.1), Mats.col(Color(0.4, 0.6, 0.95), "metal", 0.2), Vector3.ZERO, 5)
+	var hats := [Color(0.9, 0.2, 0.3), Color(0.2, 0.5, 0.9), Color(0.95, 0.8, 0.2)]
+	for k in 3:
+		var a2 := rng.randf() * TAU
+		P.cyl(n, 0.0, 0.07, 0.17, Vector3(cos(a2) * 0.45, top + 0.085, sin(a2) * 0.45), Mats.col(hats[k], "fabric", 0.3), Vector3.ZERO, 10)
+		P.cyl(n, 0.09, 0.09, 0.01, Vector3(cos(a2 + 1.0) * 0.38, top + 0.005, sin(a2 + 1.0) * 0.38), P.m_plastic(Color(0.95, 0.95, 0.93)), Vector3.ZERO, 14)
+	return n
+
+
+## Проектор на столе светит в стену: луч и белый квадрат
+static func projector(d: Dictionary) -> Node3D:
+	var n := Node3D.new()
+	var dist := float(d.get("dist", 4.0))
+	var y := 0.82
+	P.box(n, Vector3(0.3, 0.12, 0.26), Vector3(0, y, 0), Mats.col(Color(0.22, 0.22, 0.24), "metal", 0.4))
+	P.cyl(n, 0.04, 0.04, 0.06, Vector3(0, y + 0.01, -0.15), P.m_black(), Vector3(PI * 0.5, 0, 0), 10)
+	var screen := P.quad(n, Vector2(1.7, 1.15), Vector3(0, 1.55, -dist), P.m_emit(Color(0.86, 0.9, 1.0), 1.3))
+	screen.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var beam := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.03
+	cm.bottom_radius = 0.75
+	cm.height = dist - 0.15
+	cm.radial_segments = 4
+	beam.mesh = cm
+	var bm := StandardMaterial3D.new()
+	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	bm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	bm.albedo_color = Color(0.6, 0.65, 0.75, 0.05)
+	bm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	beam.material_override = bm
+	beam.rotation = Vector3(PI * 0.5, PI * 0.25, 0)
+	beam.position = Vector3(0, (y + 1.55) * 0.5, -0.15 - (dist - 0.15) * 0.5)
+	beam.rotation.x = PI * 0.5 - atan2(1.55 - y, dist)
+	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	n.add_child(beam)
+	var se := P.SoundEmitter.new()
+	se.snd = "vending_hum"
+	se.every = 0.0
+	se.vol = -24.0
+	se.max_dist = 6.0
+	se.position = Vector3(0, y, 0)
+	n.add_child(se)
+	return n
+
+
+## Лифт: створки, табло «—», кнопка вызова. Позвонишь — звенит, но двери не откроются
+static func elevator(d: Dictionary) -> Node3D:
+	var n := Node3D.new()
+	var steel := Mats.col(Color(0.66, 0.66, 0.64), "metal", 0.7)
+	var frame := Mats.col(Color(0.32, 0.32, 0.34), "metal", 0.5)
+	P.box(n, Vector3(1.45, 2.35, 0.08), Vector3(0, 1.175, 0.04), frame)
+	P.box(n, Vector3(0.6, 2.12, 0.03), Vector3(-0.305, 1.06, 0.095), steel)
+	P.box(n, Vector3(0.6, 2.12, 0.03), Vector3(0.305, 1.06, 0.095), steel)
+	P.box(n, Vector3(0.012, 2.12, 0.035), Vector3(0, 1.06, 0.1), P.m_black())
+	P.box(n, Vector3(0.5, 0.18, 0.04), Vector3(0, 2.5, 0.05), P.m_black())
+	var lb := P.label("—", P.font_sign(), 0.0045, Color(1.0, 0.25, 0.08))
+	lb.position = Vector3(0, 2.5, 0.075)
+	n.add_child(lb)
+	P.box(n, Vector3(0.12, 0.24, 0.03), Vector3(0.95, 1.1, 0.02), steel)
+	var btn := P.sph(n, 0.026, Vector3(0.95, 1.14, 0.04), P.m_emit(Color(1.0, 0.82, 0.4), 2.0))
+	P.collider(n, Vector3(1.45, 2.35, 0.2), Vector3(0, 1.175, 0.05))
+	var se := P.SoundEmitter.new()
+	se.snd = "elev_ding"
+	se.every = 55.0
+	se.vol = -6.0
+	se.max_dist = 20.0
+	se.position = Vector3(0, 2.4, 0.1)
+	n.add_child(se)
+	var busy := [false]
+	P.interactable(n, Vector3(0.3, 0.4, 0.3), Vector3(0.95, 1.12, 0.1), "ui.call", func() -> void:
+		if busy[0]:
+			return
+		busy[0] = true
+		Snd.play("ui_click", -6.0)
+		btn.scale = Vector3.ONE * 1.25
+		n.get_tree().create_timer(5.5).timeout.connect(func() -> void:
+			if is_instance_valid(n):
+				Snd.play_at("elev_ding", n.global_position + Vector3(0, 2.4, 0), n, -2.0, 1.0, 20.0, 3.0)
+				busy[0] = false))
+	return n
+
+
+## Манекен: белая гипсовая фигура на подставке. «watch» — тот, что смотрит
+static func mannequin(d: Dictionary, rng: RandomNumberGenerator) -> Node3D:
+	var n := Node3D.new()
+	var who: String = ["civ_a", "civ_e", "civ_g", "suit", "civ_b", "civ_f"][rng.randi_range(0, 5)]
+	var h := Human.make(who, int(d.get("seed", rng.randi())), true)
+	n.add_child(h)
+	h.react = bool(d.get("watch", false))
+	h.tune({"pale": 0.0, "smear": 0.0, "tex_mix": 0.0, "color": Vector3(0.9, 0.88, 0.84)})
+	h.pose("stand")
+	h._r("sh_l", 0.0, 0, 0.18)
+	h._r("sh_r", 0.0, 0, -0.18)
+	h._r("neck", 0.08)
+	P.cyl(n, 0.2, 0.24, 0.04, Vector3(0, 0.02, 0), Mats.col(Color(0.14, 0.14, 0.14), "metal", 0.4), Vector3.ZERO, 16)
+	P.collider(n, Vector3(0.5, 1.8, 0.4), Vector3(0, 0.9, 0))
+	return n
+
+
+## Холодильник: белый шкаф, гудит
+static func fridge() -> Node3D:
+	var n := Node3D.new()
+	var w := P.m_plastic(Color(0.92, 0.91, 0.87))
+	P.box(n, Vector3(0.7, 1.75, 0.65), Vector3(0, 0.875, 0), w)
+	P.box(n, Vector3(0.02, 0.5, 0.03), Vector3(0.28, 1.15, 0.34), P.m_metal())
+	P.box(n, Vector3(0.68, 0.012, 0.01), Vector3(0, 1.32, 0.33), Mats.col(Color(0.6, 0.6, 0.58), "metal", 0.3))
+	P.collider(n, Vector3(0.7, 1.75, 0.65), Vector3(0, 0.875, 0))
+	var se := P.SoundEmitter.new()
+	se.snd = "fridge_hum"
+	se.every = 0.0
+	se.vol = -14.0
+	se.max_dist = 10.0
+	se.position = Vector3(0, 1.0, 0)
+	n.add_child(se)
+	return n
+
+
+## Большой вентилятор в стене: рама, решётка, лопасти крутятся
+static func fan_big() -> Node3D:
+	var n := Node3D.new()
+	var dark := Mats.col(Color(0.18, 0.18, 0.19), "metal", 0.5)
+	var s := 1.0
+	P.box(n, Vector3(2.1, 0.12, 0.2), Vector3(0, s, 0.1), dark)
+	P.box(n, Vector3(2.1, 0.12, 0.2), Vector3(0, -s, 0.1), dark)
+	P.box(n, Vector3(0.12, 2.1, 0.2), Vector3(s, 0, 0.1), dark)
+	P.box(n, Vector3(0.12, 2.1, 0.2), Vector3(-s, 0, 0.1), dark)
+	P.quad(n, Vector2(1.9, 1.9), Vector3(0, 0, 0.02), P.m_black())
+	var sp := Spinner.new()
+	sp.axis = Vector3(0, 0, 1)
+	sp.speed = 4.0
+	sp.position = Vector3(0, 0, 0.12)
+	n.add_child(sp)
+	var bl := Mats.col(Color(0.5, 0.5, 0.48), "metal", 0.4)
+	for k in 5:
+		var a := k * TAU / 5.0
+		P.box(sp, Vector3(0.22, 0.85, 0.02), Vector3(sin(a) * 0.45, cos(a) * 0.45, 0), bl, Vector3(0.35, 0, -a))
+	P.sph(sp, 0.12, Vector3.ZERO, dark)
+	for k in 9:
+		P.rod(n, Vector3(-0.95, -0.9 + k * 0.225, 0.2), Vector3(0.95, -0.9 + k * 0.225, 0.2), 0.008, dark, 4)
+	var se := P.SoundEmitter.new()
+	se.snd = "fan_big"
+	se.every = 0.0
+	se.vol = -6.0
+	se.max_dist = 20.0
+	n.add_child(se)
+	return n
+
+
+class Shaker extends Node3D:
+	var t := 0.0
+
+	func _process(dt: float) -> void:
+		t += dt
+		position = Vector3(sin(t * 37.0) * 0.004, absf(sin(t * 23.0)) * 0.003, cos(t * 29.0) * 0.004)
+
+
+## Стиральная машина; одна из ряда крутится и трясётся
+static func washer(d: Dictionary) -> Node3D:
+	var n := Node3D.new()
+	var body: Node3D = n
+	if bool(d.get("running", false)):
+		var sh := Shaker.new()
+		n.add_child(sh)
+		body = sh
+		var se := P.SoundEmitter.new()
+		se.snd = "washer"
+		se.every = 0.0
+		se.vol = -8.0
+		se.max_dist = 14.0
+		se.position = Vector3(0, 0.5, 0)
+		n.add_child(se)
+	var white := P.m_plastic(Color(0.9, 0.9, 0.87))
+	P.box(body, Vector3(0.6, 0.85, 0.6), Vector3(0, 0.425, 0), white)
+	P.cyl(body, 0.23, 0.23, 0.02, Vector3(0, 0.45, 0.3), P.m_metal(), Vector3(PI * 0.5, 0, 0), 18)
+	P.cyl(body, 0.19, 0.19, 0.03, Vector3(0, 0.45, 0.31), Mats.col(Color(0.12, 0.15, 0.17), "metal", 0.1, {"wet": 1.0}), Vector3(PI * 0.5, 0, 0), 18)
+	P.box(body, Vector3(0.56, 0.12, 0.02), Vector3(0, 0.76, 0.3), Mats.col(Color(0.78, 0.78, 0.75), "metal", 0.3))
+	P.collider(n, Vector3(0.6, 0.85, 0.6), Vector3(0, 0.425, 0))
+	return n
+
+
+## Постамент с экспонатом
+static func pedestal(d: Dictionary) -> Node3D:
+	var n := Node3D.new()
+	P.box(n, Vector3(0.5, 1.0, 0.5), Vector3(0, 0.5, 0), P.m_plastic(Color(0.92, 0.91, 0.88)))
+	P.collider(n, Vector3(0.5, 1.0, 0.5), Vector3(0, 0.5, 0))
+	P.model(n, String(d.get("id", "marble_bust_01")), Vector3(0, 1.0, 0), PI, 1.0, false)
+	return n
+
+
+## Столбики с бархатной верёвкой (квадрат вокруг экспоната)
+static func ropes(d: Dictionary) -> Node3D:
+	var n := Node3D.new()
+	var s := float(d.get("len", 1.6))
+	var brass := Mats.col(Color(0.75, 0.6, 0.3), "metal", 0.7)
+	var red := Mats.col(Color(0.5, 0.06, 0.08), "fabric", 0.5)
+	var pts := [Vector3(0, 0, 0), Vector3(s, 0, 0), Vector3(s, 0, -s), Vector3(0, 0, -s)]
+	for k in 4:
+		var a: Vector3 = pts[k]
+		var b: Vector3 = pts[(k + 1) % 4]
+		P.cyl(n, 0.025, 0.025, 0.9, a + Vector3(0, 0.45, 0), brass, Vector3.ZERO, 8)
+		P.cyl(n, 0.1, 0.1, 0.03, a + Vector3(0, 0.015, 0), brass, Vector3.ZERO, 12)
+		if k != 0:
+			P.rod(n, a + Vector3(0, 0.82, 0), b + Vector3(0, 0.82, 0), 0.015, red, 5)
+	return n
+
+
+## Дождь с потолка над комнатой
+static func rain(d: Dictionary) -> Node3D:
+	var n := Node3D.new()
+	var sz: Vector2 = d.get("size", Vector2(6, 6))
+	var ch := float(d.get("ceil", 3.0))
+	var gp := GPUParticles3D.new()
+	gp.amount = 700
+	gp.lifetime = 0.55
+	gp.position = Vector3(0, ch - 0.05, 0)
+	gp.visibility_aabb = AABB(Vector3(-sz.x, -ch - 1.0, -sz.y), Vector3(sz.x * 2.0, ch + 2.0, sz.y * 2.0))
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	pm.emission_box_extents = Vector3(sz.x * 0.5, 0.05, sz.y * 0.5)
+	pm.direction = Vector3(0, -1, 0)
+	pm.spread = 2.0
+	pm.initial_velocity_min = 5.0
+	pm.initial_velocity_max = 6.5
+	pm.gravity = Vector3(0, -9.8, 0)
+	gp.process_material = pm
+	var q := QuadMesh.new()
+	q.size = Vector2(0.012, 0.22)
+	var qm := StandardMaterial3D.new()
+	qm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	qm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	qm.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y
+	qm.albedo_color = Color(0.75, 0.78, 0.8, 0.35)
+	q.material = qm
+	gp.draw_pass_1 = q
+	n.add_child(gp)
+	var se := P.SoundEmitter.new()
+	se.snd = "rain_room"
+	se.every = 0.0
+	se.vol = -4.0
+	se.max_dist = 22.0
+	se.position = Vector3(0, 1.0, 0)
+	n.add_child(se)
+	return n
+
+
+## Разводы протечки на потолке: рыжее кольцо с тёмным краем
+static func ceil_stain(d: Dictionary, rng: RandomNumberGenerator) -> Node3D:
+	var n := Node3D.new()
+	var s := float(d.get("s", 1.2))
+	var y := float(d.get("y", 3.2)) - 0.006
+	var dark := bool(d.get("dark", false))
+	var m1 := P.decal_mat("ceil_stain_a", {"radial": 1.0, "tint": Color(0.45, 0.29, 0.09, 0.58)})
+	var m2 := P.decal_mat("ceil_stain_b", {"radial": 1.0, "tint": Color(0.3, 0.19, 0.07, 0.7)})
+	var q1 := P.quad(n, Vector2(s, s * rng.randf_range(0.7, 1.2)), Vector3(0, y, 0), m1 if not dark else m2, Vector3(PI * 0.5, 0, 0))
+	q1.set_instance_shader_parameter("seed", rng.randf() * 10.0)
+	var q2 := P.quad(n, Vector2(s * 0.55, s * 0.5), Vector3(rng.randf_range(-0.15, 0.15), y - 0.002, rng.randf_range(-0.15, 0.15)), m2, Vector3(PI * 0.5, 0, 0))
+	q2.set_instance_shader_parameter("seed", rng.randf() * 10.0)
+	return n
+
+
+## Потёк по обоям от потолка вниз
+static func streak(d: Dictionary, rng: RandomNumberGenerator) -> Node3D:
+	var n := Node3D.new()
+	var length := float(d.get("len", 1.4))
+	var top := float(d.get("y", 3.2))
+	var m := P.decal_mat("wall_streak", {"stripes": 1.0, "tint": Color(0.32, 0.22, 0.08, 0.5)})
+	var q := P.quad(n, Vector2(rng.randf_range(0.25, 0.5), length), Vector3(0, top - length * 0.5, 0.013), m)
+	q.set_instance_shader_parameter("seed", rng.randf() * 10.0)
 	return n

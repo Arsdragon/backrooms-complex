@@ -18,6 +18,13 @@ const PLAN := [
 	["sunken", -1, 2, 14, 100, 14, 12], ["terrace", 0, 2, 18, 110, 12, 11], ["chasm", -1, 1, 22, 110, 12, 9],
 	["stairwell", -1, 2, 12, 100, 2, 9], ["ramp", -1, 2, 12, 100, 2, 12], ["holes", -1, 2, 15, 100, 8, 8],
 	["atrium", 0, 1, 26, 120, 12, 12], ["tall_hall", 0, 2, 20, 120, 20, 16], ["well", -1, 1, 30, 120, 12, 12],
+	# обжитые и странные места — по одному
+	["waiting", 0, 1, 16, 110, 8, 6], ["lounge", 0, 1, 20, 115, 9, 7], ["party", -1, 1, 25, 110, 6, 6],
+	["conference", 0, 1, 18, 110, 8, 5], ["archive", 0, 1, 24, 115, 9, 8], ["elevators", 0, 1, 16, 110, 6, 4],
+	["mannequins", -1, 1, 28, 115, 7, 7], ["kitchen", 0, 1, 18, 110, 5, 5], ["bedroom", -1, 1, 30, 120, 10, 10],
+	["fans", -1, 1, 24, 110, 8, 6], ["laundry", 0, 1, 18, 110, 6, 5], ["pillar_forest", -1, 1, 24, 115, 14, 14],
+	["windows", 0, 1, 24, 115, 9, 9], ["museum", 0, 1, 28, 120, 8, 6], ["rain", -1, 1, 24, 110, 7, 6],
+	["lowmaze", 0, 1, 24, 115, 12, 10],
 ]
 
 
@@ -50,6 +57,7 @@ static func place_all(L: LayerData, lay: int, origin: Vector2i) -> void:
 				L.places.erase("_entry")
 	sprinkle_holes(L, lay, origin)
 	sprinkle_finds(L, lay, origin)
+	sprinkle_stains(L, lay, origin)
 
 
 static func call_room(t: String, L: LayerData, x: int, z: int, w: int, h: int, lay: int) -> void:
@@ -89,6 +97,22 @@ static func call_room(t: String, L: LayerData, x: int, z: int, w: int, h: int, l
 		"atrium": atrium(L, x, z, w, h)
 		"tall_hall": tall_hall(L, x, z, w, h)
 		"well": well(L, x, z, w, h)
+		"waiting": waiting(L, x, z, w, h)
+		"lounge": lounge(L, x, z, w, h)
+		"party": party(L, x, z, w, h)
+		"conference": conference(L, x, z, w, h)
+		"archive": archive(L, x, z, w, h)
+		"elevators": elevators(L, x, z, w, h)
+		"mannequins": mannequins(L, x, z, w, h)
+		"kitchen": kitchen(L, x, z, w, h)
+		"bedroom": bedroom(L, x, z, w, h)
+		"fans": fans(L, x, z, w, h)
+		"laundry": laundry(L, x, z, w, h)
+		"pillar_forest": pillar_forest(L, x, z, w, h)
+		"windows": windows(L, x, z, w, h)
+		"museum": museum(L, x, z, w, h)
+		"rain": rain_room(L, x, z, w, h)
+		"lowmaze": lowmaze(L, x, z, w, h)
 
 
 # ------------------------------------------------------------ помощники
@@ -1047,3 +1071,308 @@ static func sprinkle_finds(L: LayerData, lay: int, origin: Vector2i) -> void:
 			L.used[ci] = 1
 			L.places["find_%s_%d" % [kind, made]] = p
 			made += 1
+
+
+# ------------------------------------------------------------ обжитые и странные места
+
+## Точка у стены d клетки (x, z) на высоте y, повёрнутая в комнату
+static func _wall(L: LayerData, x: int, z: int, d: int, y: float, inset := 0.0, along := 0.0) -> Vector3:
+	return L.wall_point(x, z, d, inset, along) + Vector3(0, y, 0)
+
+
+## Комната ожидания: ряды стульев смотрят на телевизор, на табло номер, который никто не вызовет
+static func waiting(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_open(L, x, z, w, h, 2, LD.E_ARCH)
+	_lights(L, x, z, w, h, LD.L_ON, false)
+	var cxw := x + w / 2
+	L.add_deco({"k": "tv_on", "p": _wall(L, cxw, z, 3, 0.0, 0.45), "r": LD.dir_yaw(3), "ch": "static" if L.rng.randf() < 0.5 else "news"})
+	L.add_deco({"k": "text", "key": "sign.ticket", "p": _wall(L, cxw - 2, z, 3, 2.15), "r": LD.dir_yaw(3), "color": Color(1.0, 0.18, 0.08),
+		"px": 0.0045, "plate": true, "plate_size": Vector2(0.95, 0.42)})
+	L.add_deco({"k": "chairs", "p": _mid(L, x, z, w, h) + Vector3(0, 0, 1.2), "r": LD.dir_yaw(3), "cols": 6, "rows": 3})
+	L.add_deco({"k": "obj", "what": "cooler", "p": _wall(L, x, z + h - 1, 2, 0.0, 0.4), "r": LD.dir_yaw(2), "wrong": "none"})
+	_model(L, "potted_plant_04", _wall(L, x + w - 1, z, 0, 0.0, 0.4), 0.0)
+	_model(L, "wall_clock", _wall(L, x + w - 1, z + h / 2, 0, 2.1), LD.dir_yaw(0), 1.0, false)
+	L.add_deco({"k": "sound", "p": _wall(L, x + w - 1, z + h / 2, 0, 2.0), "snd": "clock_tick", "every": 0.0, "vol": -14.0, "max_dist": 10.0})
+	if L.rng.randf() < 0.6:
+		L.add_deco({"k": "copy", "who": "civ_f", "wrong": "seated_air", "p": _mid(L, x, z, w, h) + Vector3(0.85, 0, 1.2), "r": LD.dir_yaw(1), "seed": L.rng.randi(), "react": true})
+
+
+## Холл отеля: диваны, столики, цветы, под потолком медленно крутятся вентиляторы
+static func lounge(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_open(L, x, z, w, h, 3, LD.E_ARCH)
+	_lights(L, x, z, w, h, LD.L_ON)
+	var m := _mid(L, x, z, w, h)
+	var sofas := ["sofa_02", "sofa_03", "Sofa_01"]
+	for k in 2:
+		var c := m + Vector3(-2.6 + k * 5.2, 0, 0)
+		_model(L, sofas[L.rng.randi_range(0, 2)], c + Vector3(0, 0, -1.3), 0.0)
+		_model(L, "modern_coffee_table_01" if k == 0 else "CoffeeTable_01", c, 0.0)
+		_model(L, "ArmChair_01" if k == 0 else "modern_arm_chair_01", c + Vector3(1.4, 0, 0.3), -PI * 0.5)
+	for corner in [Vector2i(x, z), Vector2i(x + w - 1, z + h - 1)]:
+		_model(L, "potted_plant_04", _c(L, corner.x, corner.y), L.rng.randf() * TAU)
+	for k in 2:
+		L.add_deco({"k": "spin", "id": "ceiling_fan", "p": m + Vector3(-2.6 + k * 5.2, 0, 0), "r": 0.0, "speed": 1.6 + k * 0.4, "on_ceiling": true})
+	_model(L, "hanging_picture_frame_01", _wall(L, x + w / 2, z, 3, 1.6), LD.dir_yaw(3), 1.0, false)
+	L.add_deco({"k": "sound", "p": m + Vector3(0, 2.4, 0), "snd": "store_muzak", "every": 0.0, "vol": -22.0, "max_dist": 14.0})
+
+
+## Детский праздник: стол с тортом, шарики, колпаки, магнитофон играет поплывшую мелодию. Гостей нет
+static func party(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_open(L, x, z, w, h, 2, LD.E_DOOR)
+	_lights(L, x, z, w, h, LD.L_ON, false)
+	L.light[LD.idx(x + w - 1, z + h - 1)] = LD.L_FLICK
+	var m := _mid(L, x, z, w, h)
+	L.add_deco({"k": "cake", "p": m, "r": 0.0})
+	for k in 6:
+		var a := k * TAU / 6.0
+		_model(L, "plastic_monobloc_chair_01", m + Vector3(cos(a) * 1.25, 0, sin(a) * 1.25), -a - PI * 0.5, 0.85)
+	for k in 6:
+		L.add_deco({"k": "obj", "what": "balloon", "p": _c(L, x + L.rng.randi_range(0, w - 1), z + L.rng.randi_range(0, h - 1)), "r": 0.0, "wrong": "none"})
+	L.add_deco({"k": "text", "key": "sign.party", "p": _wall(L, x + w / 2, z, 3, 2.05), "r": LD.dir_yaw(3), "color": Color(0.85, 0.15, 0.35),
+		"px": 0.0055, "hand": true})
+	_model(L, "boombox", _wall(L, x, z + h / 2, 2, 0.0, 0.3), LD.dir_yaw(2), 1.0, false)
+	L.add_deco({"k": "sound", "p": _wall(L, x, z + h / 2, 2, 0.3, 0.3), "snd": "jingle_wrong", "every": 0.0, "vol": -10.0, "max_dist": 16.0})
+
+
+## Переговорная: длинный стол, стулья, проектор светит в стену белым квадратом
+static func conference(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	L._open_border(x, z, w, h, 1, LD.E_DOOR)
+	L._open_border(x, z, w, h, 3, LD.E_DOOR)
+	_lights(L, x, z, w, h, LD.L_DEAD)
+	L.light[LD.idx(x + w - 2, z + h / 2)] = LD.L_FLICK
+	var m := _mid(L, x, z, w, h)
+	for k in 2:
+		_model(L, "dining_table", m + Vector3(-1.1 + k * 2.2, 0, 0), PI * 0.5)
+	for k in 4:
+		for sd in [-1.0, 1.0]:
+			_model(L, "dining_chair_02", m + Vector3(-2.4 + k * 1.6, 0, 0.85 * sd), PI if sd > 0.0 else 0.0)
+	# проектор смотрит на западную стену; квадрат света — на ней
+	L.add_deco({"k": "projector", "p": m + Vector3(1.8, 0, 0), "r": LD.dir_yaw(2), "dist": w * 0.5 * LD.C + 1.8 - 0.13})
+	_model(L, "classic_laptop", m + Vector3(-0.5, 0.78, 0.1), 0.6, 1.0, false)
+	_model(L, "clipboard", m + Vector3(0.6, 0.78, -0.2), 1.2, 1.0, false)
+	_model(L, "plastic_bottle_gallon", _wall(L, x + w - 1, z, 0, 0.0, 0.4), 0.0)
+
+
+## Архив: проходы между стеллажами, бумаги на полу, у стены стол с лампой
+static func archive(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_open(L, x, z, w, h, 2, LD.E_ARCH)
+	_lights(L, x, z, w, h, LD.L_FLICK)
+	for i in range(1, w - 1, 2):
+		for j in range(1, h - 1):
+			var shelf := "wooden_bookshelf_worn" if (i + j) % 3 == 0 else "steel_frame_shelves_03"
+			_model(L, shelf, _c(L, x + i, z + j) + Vector3(0, 0, 0), PI * 0.5)
+	for k in 5:
+		L.add_deco({"k": "papers", "p": _c(L, x + L.rng.randi_range(0, w - 1), z + L.rng.randi_range(0, h - 1)), "r": L.rng.randf() * TAU})
+	_model(L, "drawer_cabinet", _wall(L, x, z, 3, 0.0, 0.35), LD.dir_yaw(3))
+	L.add_deco({"k": "obj", "what": "desk", "p": _wall(L, x + w - 1, z + h - 1, 1, 0.0, 0.5), "r": LD.dir_yaw(1), "wrong": "none"})
+	_model(L, "office_notepads", _wall(L, x + w - 1, z + h - 1, 1, 0.76, 0.6), 0.3, 1.0, false)
+
+
+## Лифтовой холл: три лифта, кнопка вызова горит; лифт иногда звенит, но двери не открываются
+static func elevators(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	L._open_border(x, z, w, h, 1, LD.E_ARCH)
+	L._open_border(x, z, w, h, 0, LD.E_OPEN)
+	_lights(L, x, z, w, h, LD.L_ON, false)
+	for k in 3:
+		var ex := x + 1 + k * 2 if w >= 6 else x + k
+		L.add_deco({"k": "elevator", "p": _wall(L, ex, z, 3, 0.0), "r": LD.dir_yaw(3), "seed": L.rng.randi()})
+	_model(L, "modular_street_seating", _wall(L, x + w / 2, z + h - 1, 1, 0.0, 0.5), LD.dir_yaw(1))
+	_model(L, "potted_plant_04", _c(L, x, z + h - 1), 0.0)
+
+
+## Манекены: белые фигуры стоят лицом к стенам. Одна — нет
+static func mannequins(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_open(L, x, z, w, h, 2, LD.E_ARCH)
+	_lights(L, x, z, w, h, LD.L_DEAD)
+	L.light[LD.idx(x + w / 2, z + h / 2)] = LD.L_ON
+	L.light[LD.idx(x + 1, z + 1)] = LD.L_FLICK
+	var placed := 0
+	for i in w:
+		for j in h:
+			var sides := L.wall_sides(x + i, z + j)
+			if sides.is_empty() or L.rng.randf() < 0.55 or placed >= 8:
+				continue
+			var sd: int = sides[0]
+			# лицом к стене, в полуметре от неё
+			L.add_deco({"k": "mannequin", "p": L.wall_point(x + i, z + j, sd, 0.45), "r": LD.dir_yaw(sd) + PI, "seed": L.rng.randi()})
+			placed += 1
+	var m := _mid(L, x, z, w, h)
+	L.add_deco({"k": "mannequin", "p": m + Vector3(0.3, 0, 0.8), "r": L.rng.randf() * TAU, "seed": L.rng.randi(), "watch": true})
+
+
+## Кухня: плита, микроволновка, стол, банки, гудит холодильник
+static func kitchen(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_open(L, x, z, w, h, 1, LD.E_DOOR)
+	_lights(L, x, z, w, h, LD.L_ON)
+	_model(L, "electric_stove", _wall(L, x + 1, z, 3, 0.0, 0.4), LD.dir_yaw(3))
+	L.add_deco({"k": "fridge", "p": _wall(L, x + 3, z, 3, 0.0, 0.4), "r": LD.dir_yaw(3)})
+	var m := _mid(L, x, z, w, h)
+	_model(L, "WoodenTable_01", m + Vector3(0, 0, 0.8), 0.0)
+	_model(L, "vintage_microwave", m + Vector3(-0.2, 0.76, 0.8), 0.4, 1.0, false)
+	_model(L, "russian_food_cans_01", m + Vector3(0.4, 0.76, 0.9), 0.0, 1.0, false)
+	for k in 3:
+		_model(L, "can_rusted", m + Vector3(L.rng.randf_range(-1.5, 1.5), 0, L.rng.randf_range(-1.0, 2.0)), L.rng.randf() * TAU, 1.0, false)
+	_model(L, "metal_trash_can", _wall(L, x + w - 1, z + h - 1, 0, 0.0, 0.35), 0.0)
+	_model(L, "folding_wooden_stool", m + Vector3(0.9, 0, 1.5), 0.7)
+
+
+## Спальня посреди огромного тёмного зала: кровать, тумбочка, будильник, лампочка на шнуре
+static func bedroom(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_DARK, 0)
+	_open(L, x, z, w, h, 3, LD.E_OPEN)
+	for i in w:
+		for j in h:
+			var ci := LD.idx(x + i, z + j)
+			L.used[ci] = 2
+			L.light[ci] = LD.L_NONE
+	var m := _mid(L, x, z, w, h)
+	var cc := Vector2i(x + w / 2, z + h / 2)
+	L.light[LD.idx(cc.x, cc.y)] = LD.L_BULB
+	_model(L, "old_bed_frame", m, L.rng.randf_range(-0.3, 0.3))
+	_model(L, "ClassicNightstand_01", m + Vector3(1.2, 0, -0.6), 0.0)
+	_model(L, "alarm_clock_01", m + Vector3(1.2, 0.62, -0.6), 0.3, 1.0, false)
+	_model(L, "pull_chain_light_socket", Vector3(m.x, L.floor_y + 2.9, m.z), 0.0, 1.0, false)
+	L.add_deco({"k": "sound", "p": m + Vector3(1.2, 0.7, -0.6), "snd": "clock_tick", "every": 0.0, "vol": -12.0, "max_dist": 9.0})
+
+
+## Вентиляторная: большой вентилятор в стене, наружные блоки, воздуховоды, ровный ветер
+static func fans(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_open(L, x, z, w, h, 2, LD.E_ARCH)
+	_lights(L, x, z, w, h, LD.L_FLICK)
+	L.add_deco({"k": "fan_big", "p": _wall(L, x + w / 2, z, 3, 1.4, 0.0), "r": LD.dir_yaw(3)})
+	for k in 3:
+		_model(L, "exterior_aircon_unit", _wall(L, x + 1 + k * 2, z + h - 1, 1, 0.0, 0.4), LD.dir_yaw(1))
+	L.add_deco({"k": "pipes", "p": _c(L, x + w / 2, z + h / 2), "r": 0.0, "len": (w - 1) * LD.C, "y": L.height_m(x, z) - 0.35})
+	L.add_deco({"k": "drips", "p": _c(L, x + w - 2, z + 1), "r": 0.0})
+
+
+## Прачечная: ряд стиральных машин, одна крутится
+static func laundry(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_open(L, x, z, w, h, 2, LD.E_DOOR)
+	_lights(L, x, z, w, h, LD.L_ON)
+	var run := L.rng.randi_range(0, w - 1)
+	for i in w:
+		L.add_deco({"k": "washer", "p": _wall(L, x + i, z, 3, 0.0, 0.35), "r": LD.dir_yaw(3), "running": i == run})
+	_model(L, "plastic_container", _c(L, x + 1, z + h - 2), 0.4)
+	_model(L, "metal_stool_02", _c(L, x + w - 2, z + h - 2), 0.0)
+
+
+## Лес колонн: колонны в каждой клетке, редкий свет — как бетонный лес
+static func pillar_forest(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	for k in 6:
+		L._open_border(x, z, w, h, k % 4, LD.E_OPEN)
+	for i in range(1, w):
+		for j in range(1, h):
+			if L.rng.randf() < 0.82:
+				L.post[LD.idx(x + i, z + j)] = 1
+	for i in w:
+		for j in h:
+			var ci := LD.idx(x + i, z + j)
+			L.used[ci] = 2
+			L.light[ci] = LD.L_ON if (i % 4 == 1 and j % 4 == 1) else (LD.L_DEAD if (i + j) % 5 == 0 else LD.L_NONE)
+
+
+## Комнаты за стеклом: решётка комнат через окна; в каждой своё — и не во всякую можно войти
+static func windows(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_open(L, x, z, w, h, 2, LD.E_ARCH)
+	_lights(L, x, z, w, h, LD.L_ON)
+	# стены-окна между квадратами 3×3
+	for i in w:
+		for j in h:
+			if i % 3 == 2 and i < w - 1:
+				L.set_edge(x + i, z + j, 0, LD.E_WINDOW)
+			if j % 3 == 2 and j < h - 1:
+				L.set_edge(x + i, z + j, 1, LD.E_WINDOW)
+	# пара проходов, чтобы попасть внутрь
+	L.set_edge(x + 2, z + 1, 0, LD.E_DOOR)
+	L.set_edge(x + 4, z + 5, 1, LD.E_DOOR)
+	var things := ["chair", "tv", "desk", "cabinet", "balloon", "wheelchair"]
+	for bi in 3:
+		for bj in 3:
+			var c := _c(L, x + bi * 3 + 1, z + bj * 3 + 1)
+			var r := L.rng.randf()
+			if r < 0.15:
+				L.add_deco({"k": "mannequin", "p": c, "r": L.rng.randf() * TAU, "seed": L.rng.randi()})
+			elif r < 0.85:
+				L.add_deco({"k": "obj", "what": things[L.rng.randi_range(0, things.size() - 1)], "p": c, "r": L.rng.randf() * TAU, "wrong": "none"})
+
+
+## Выставка: бюст и кошка на постаментах за верёвками, картины без картин
+static func museum(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_open(L, x, z, w, h, 2, LD.E_ARCH)
+	_lights(L, x, z, w, h, LD.L_ON, false)
+	var m := _mid(L, x, z, w, h)
+	var items := ["marble_bust_01", "concrete_cat_statue", "vintage_suitcase", "rubber_duck_toy"]
+	for k in 3:
+		var p := m + Vector3(-2.4 + k * 2.4, 0, -0.6)
+		L.add_deco({"k": "pedestal", "p": p, "r": 0.0, "id": items[(k + L.rng.randi_range(0, 3)) % items.size()]})
+		L.add_deco({"k": "ropes", "p": p + Vector3(-0.8, 0, 0.8), "r": 0.0, "len": 1.6})
+	for k in 3:
+		_model(L, "hanging_picture_frame_01", _wall(L, x + 1 + k * 3, z, 3, 1.6), LD.dir_yaw(3), 1.0, false)
+	L.add_deco({"k": "text", "key": "sign.museum", "p": _wall(L, x, z + h / 2, 2, 1.5), "r": LD.dir_yaw(2), "color": Color(0.1, 0.1, 0.12),
+		"px": 0.0028, "plate": true, "plate_color": Color(0.88, 0.86, 0.8), "plate_size": Vector2(0.7, 0.3)})
+	_model(L, "modular_street_seating", m + Vector3(0, 0, 1.8), PI)
+
+
+## Комната, где идёт дождь: с потолка льёт, пол в воде
+static func rain_room(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_DARK, 0)
+	_open(L, x, z, w, h, 2, LD.E_ARCH)
+	_lights(L, x, z, w, h, LD.L_FLICK, false)
+	for i in w:
+		for j in h:
+			L.water[LD.idx(x + i, z + j)] = 1
+	L.add_deco({"k": "rain", "p": _mid(L, x, z, w, h), "r": 0.0, "size": Vector2(w * LD.C - 0.4, h * LD.C - 0.4)})
+
+
+## Лабиринт низких перегородок посреди зала: над ними видно весь зал, а пройти — не сразу
+static func lowmaze(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_open(L, x, z, w, h, 4, LD.E_OPEN)
+	_lights(L, x, z, w, h, LD.L_ON)
+	for i in range(1, w - 1):
+		for j in range(1, h - 1):
+			var c := _c(L, x + i, z + j)
+			if L.rng.randf() < 0.42:
+				L.add_deco({"k": "panel", "p": c + Vector3(LD.C * 0.5, 0, 0), "r": 0.0, "size": Vector3(0.12, 1.25, LD.C + 0.06)})
+			if L.rng.randf() < 0.42:
+				L.add_deco({"k": "panel", "p": c + Vector3(0, 0, LD.C * 0.5), "r": PI * 0.5, "size": Vector3(0.12, 1.25, LD.C + 0.06)})
+
+
+## Рыжие разводы протечек на потолочных плитах и потёки по обоям от потолка — по всему миру, но редко
+static func sprinkle_stains(L: LayerData, lay: int, origin: Vector2i) -> void:
+	var rr := L.rng
+	for z in range(origin.y - 150, origin.y + 151):
+		for x in range(origin.x - 150, origin.x + 151):
+			var i := LD.idx(x, z)
+			if L.flo[i] != LD.F_FLOOR or not L.flat0(i) or L.used[i] == 2:
+				continue
+			var hh := L.height_m(x, z)
+			if hh < 2.3 or hh > 5.0:
+				continue
+			var r := rr.randf()
+			var wet := L.zone[i] == LD.Z_DARK or lay == 1
+			if r < (0.07 if wet else 0.035):
+				var c := _c(L, x, z)
+				L.add_deco({"k": "ceil_stain", "p": c + Vector3(rr.randf_range(-0.7, 0.7), 0, rr.randf_range(-0.7, 0.7)), "r": rr.randf() * TAU,
+					"s": rr.randf_range(0.7, 2.0), "y": hh, "dark": wet})
+			elif r < (0.1 if wet else 0.05):
+				var sides := L.wall_sides(x, z)
+				if sides.is_empty():
+					continue
+				var sd: int = sides[rr.randi_range(0, sides.size() - 1)]
+				L.add_deco({"k": "streak", "p": L.wall_point(x, z, sd, 0.0, rr.randf_range(-0.8, 0.8)), "r": LD.dir_yaw(sd), "y": hh,
+					"len": rr.randf_range(0.8, 2.2)})

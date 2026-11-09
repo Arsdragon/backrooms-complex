@@ -54,7 +54,7 @@ static func arch(id: int) -> Material:
 		CB.M_CEIL_CONC: m = _a("concrete", "concrete_dirty", Vector2(2.4, 2.4), 0.5)
 		CB.M_CEIL_PLASTER: m = _a("plaster", "plaster", Vector2(1.5, 1.5), 0.0)
 		CB.M_FIXTURE: m = _a("fixture", "fixture", Vector2(1.0, 1.0), 0.0, {"emissive": 2.6})
-		CB.M_FIXTURE_DEAD: m = _a("fixture", "fixture", Vector2(1.0, 1.0), 0.0, {"emissive": 0.0, "tint": Vector3(0.55, 0.55, 0.52)})
+		CB.M_FIXTURE_DEAD: m = _a("fixture", "fixture", Vector2(1.0, 1.0), 0.0, {"emissive": 0.0, "tint": Vector3(0.84, 0.84, 0.8)})
 		CB.M_HOLE: m = _a("concrete", "concrete", Vector2(1.0, 1.0), 0.0, {"tint": Vector3(0.02, 0.02, 0.02)})
 		CB.M_PIT: m = _a("concrete", "concrete_dirty", Vector2(2.4, 2.4), 0.7, {"pit": 1.0, "tint": Vector3(0.6, 0.58, 0.5)})
 		CB.M_GLASS:

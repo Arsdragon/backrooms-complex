@@ -1231,7 +1231,8 @@ static func sound_emitter(d: Dictionary) -> Node3D:
 	var se := SoundEmitter.new()
 	se.snd = String(d.get("snd", "copy_whisper"))
 	se.every = float(d.get("every", 0.0))
-	se.vol = -6.0
+	se.vol = float(d.get("vol", -6.0))
+	se.max_dist = float(d.get("max_dist", 22.0))
 	return se
 
 

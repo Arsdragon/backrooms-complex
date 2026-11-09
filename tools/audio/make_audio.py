@@ -22,7 +22,7 @@ LOOPS = {"hum_fluor", "room_tone", "null_hum", "park_ambience", "wind_trees", "w
          "threshold_hum", "tv_static", "fridge_hum", "radio_static", "tape_whir", "sea_waves", "wind_open", "wind_fall",
          "upstairs_tv", "crickets", "death_drone", "birds_wrong", "jingle_wrong", "music_box", "engine_tick",
          "vending_hum", "speaker_hiss", "tv_news", "tv_jingle", "tv_home", "clock_tick", "vent_air", "store_muzak", "water_amb",
-         "heartbeat", "under_rumble", "space_tone"}
+         "heartbeat", "under_rumble", "space_tone", "washer", "fan_big", "rain_room"}
 
 
 # ----------------------------------------------------------------- базовые кирпичики
@@ -1011,13 +1011,39 @@ def end_sfx():
     save("space_tone", norm(loopify(ring + blood, 0.8), 0.35))
 
 
+def rooms2_sfx():
+    # лифт: двойное «динь»
+    sec = 2.6
+    t = T(sec)
+    d = np.sin(2 * np.pi * 1318 * t) * np.exp(-t * 2.2) + 0.7 * np.sin(2 * np.pi * 1046 * t) * np.exp(-np.clip(t - 0.4, 0, None) * 2.2) * (t > 0.4)
+    save("elev_ding", norm(reverb(d, 1.5, 0.3), 0.6))
+    # стиральная машина: барабан, стук
+    sec = 6.0
+    t = T(sec)
+    w = lp(pink(sec), 300) * 0.6 + np.sin(2 * np.pi * 52 * t) * 0.25
+    for k in range(6):
+        place(w, lp(white(0.08), 900) * np.exp(-T(0.08) * 40) * 0.8, k * 1.0 + 0.3)
+    save("washer", norm(loopify(w, 0.5), 0.5))
+    # большой вентилятор: шум воздуха с «биением» лопастей
+    sec = 6.0
+    t = T(sec)
+    f = lp(pink(sec), 500) * 0.7 * (0.8 + 0.2 * np.sin(2 * np.pi * 4.5 * t)) + np.sin(2 * np.pi * 36 * t) * 0.15
+    save("fan_big", norm(loopify(f, 0.5), 0.55))
+    # дождь в комнате
+    sec = 8.0
+    x = lp(white(sec) * 0.25, 6000)
+    for k in range(500):
+        place(x, hp(white(0.006), 2000) * np.exp(-T(0.006) * 500) * R.uniform(0.1, 0.6), R.uniform(0, sec - 0.01))
+    save("rain_room", norm(loopify(x, 0.5), 0.6))
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     only = sys.argv[1:]
     jobs = [("hum_fluor", hum_fluor), ("room_tone", room_tone), ("null_hum", null_hum), ("null_burst", null_burst),
             ("threshold", threshold_hum), ("threshold_pass", threshold_pass), ("step", steps), ("breath", breath_heavy),
             ("lf_", lifeform), ("st_", stalker), ("copy_", copies), ("misc", misc_complex), ("music", music), ("bird", birds),
-            ("park", park), ("machines", machines), ("outdoors", outdoors), ("sfx", sfx), ("hatch", hatch), ("rooms", rooms_sfx), ("lamp", lamps), ("power", power_sfx), ("endfx", end_sfx)]
+            ("park", park), ("machines", machines), ("outdoors", outdoors), ("sfx", sfx), ("hatch", hatch), ("rooms", rooms_sfx), ("lamp", lamps), ("power", power_sfx), ("endfx", end_sfx), ("rooms2", rooms2_sfx)]
     for name, fn in jobs:
         if only and not any(name.startswith(o) or o.startswith(name) for o in only):
             continue
