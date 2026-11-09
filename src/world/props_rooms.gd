@@ -807,7 +807,8 @@ static func text(d: Dictionary) -> Node3D:
 		var pc: Color = d.get("plate_color", Color(0.05, 0.05, 0.05))
 		P.box(n, Vector3(ps.x, ps.y, 0.03), Vector3(0, 0, 0.015), Mats.col(pc, "metal", 0.2))
 	var col: Color = d.get("color", Color(0.08, 0.08, 0.1))
-	var lb := P.label(Loc.t(String(d.get("key", "sign.exit"))), P.font_hand() if bool(d.get("hand", false)) else P.font_sign(), float(d.get("px", 0.004)), col)
+	var txt := String(d.get("txt", "")) if d.has("txt") else Loc.t(String(d.get("key", "sign.exit")))
+	var lb := P.label(txt, P.font_hand() if bool(d.get("hand", false)) else P.font_sign(), float(d.get("px", 0.004)), col)
 	lb.position = Vector3(0, 0, 0.036)
 	n.add_child(lb)
 	return n

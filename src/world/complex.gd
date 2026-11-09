@@ -741,6 +741,9 @@ func _tour(dir: String) -> void:
 				player.set_look(0.0 if view == 0 else PI, -0.08)
 			_sync_load(player.global_position, 1)
 			gain = 1.0
+			hurt = 0.0
+			_no_fall_t = 5.0
+			Game.main.hurt = 0.0
 			for f in 30:
 				await get_tree().process_frame
 			await get_tree().create_timer(2.0).timeout
