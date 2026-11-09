@@ -23,6 +23,7 @@ instance uniform vec4 light_level = vec4(0.8, 0.0, 0.0, 0.0);
 
 global uniform vec4 g_flick_a;
 global uniform vec4 g_flick_b;
+global uniform float g_power;
 global uniform vec4 g_dim;
 global uniform vec4 g_null;
 global uniform vec4 g_fog;
@@ -77,7 +78,7 @@ void fragment() {
 	vec3 warm = vec3(1.0, 0.965, 0.84);
 	vec3 fc = (g == 7) ? vec3(0.35, 1.0, 0.55) : warm;
 	float shade = 0.5 + 0.5 * clamp(wnorm.y * 0.8 + 0.35, 0.0, 1.0);
-	vec3 L = (warm * light_level.r + fc * light_level.g * flick(g) + vec3(0.8, 0.07, 0.04) * light_level.b) * shade;
+	vec3 L = ((warm * light_level.r + fc * light_level.g * flick(g)) * g_power + vec3(0.8, 0.07, 0.04) * light_level.b) * shade;
 
 	float dd = distance(wpos, g_dim.xyz);
 	float dimf = g_dim.w * smoothstep(14.0, 2.0, dd);

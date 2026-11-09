@@ -20,6 +20,7 @@ global uniform vec4 g_fog;
 global uniform float g_ambient;
 global uniform float g_time;
 global uniform vec4 g_cam_light;   // «подсветка» камеры: xyz позиция, w сила (обычно 0)
+global uniform float g_power;      // питание ламп: 1 — норма, просадка/отключение — меньше
 
 varying vec3 wpos;
 varying vec4 lc;
@@ -49,9 +50,9 @@ void fragment() {
 	int g = int(lc.a * 8.0 + 0.5);
 	float fv = flick(g);
 	vec3 warm = vec3(1.0, 0.965, 0.84);
-	vec3 L = warm * lc.r * 2.0;
+	vec3 L = warm * lc.r * 2.0 * g_power;
 	vec3 fc = (g == 7) ? vec3(0.35, 1.0, 0.55) : warm;
-	L += fc * lc.g * 2.0 * fv;
+	L += fc * lc.g * 2.0 * fv * (g == 7 ? 1.0 : g_power);
 	L += vec3(0.8, 0.07, 0.04) * lc.b * 2.0;
 
 	// Сущность рядом — лампы гаснут и дрожат
@@ -78,7 +79,7 @@ void fragment() {
 	L += vec3(g_ambient);
 	vec3 col = base * L * ao;
 	if (emissive > 0.0) {
-		float on = lc.r + lc.g * fv;
+		float on = (lc.r + lc.g * fv) * g_power;
 		vec3 em = mix(vec3(0.09, 0.085, 0.08), vec3(1.0, 0.98, 0.9) * emissive, clamp(on, 0.0, 1.0));
 		if (g == 7) em = mix(em, vec3(0.3, 1.0, 0.5) * emissive * 0.6, lc.g * fv);
 		em = mix(em, vec3(1.0, 0.08, 0.05) * emissive * 0.8, lc.b);

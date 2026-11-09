@@ -10,7 +10,8 @@ Found-footage хоррор по лору Backrooms Кейна Парсонса (
 - Генераторы (результаты в репо): `tools/tex/make_textures.py` → tex/, `tools/audio/make_audio.py [префиксы]` → audio/,
   `tools/voice/make_voice.py` (Windows TTS: RU Irina/Pavel через WinRT, EN Zira через SAPI) → voice/,
   `tools/models/fetch_models.py` (Poly Haven CC0, glTF 1k) → models/ (+CREDITS.txt),
-  `tools/models/fetch_humans.py` (Microsoft Rocketbox, MIT: FBX + цветные TGA, ужаты до 1024) → humans/ (+CREDITS.txt).
+  `tools/models/fetch_humans.py` (Microsoft Rocketbox, MIT: FBX + цветные TGA, ужаты до 1024) → humans/ (+CREDITS.txt),
+  `tools/tex/make_graffiti.py` — надписи graf.* «от руки» в tex/graf_<ключ>_<ru|en>.png (Segoe Print: у Ink Free «Н»/«H» как «#»).
 - После импорта всегда `python tools/fix_imports.py` и повторный импорт: мип-карты/VRAM для tex и моделей, loop=true для
   звуков из списка LOOPS. Новые зацикленные звуки добавлять в LOOPS и там, и в make_audio.py.
 
@@ -26,6 +27,9 @@ Found-footage хоррор по лору Backrooms Кейна Парсонса (
 - `--world=base|adventure|survival|polygon` — режим мира; `--menu=worlds|polygon|rooms` — открыть экран меню;
   `--poly=park|l0|l1|place:<ключ>[:1]|ending:<вид>|death|gallery:<набор>` — запуск как из полигона;
   `--fc_test` — проверка мыши и свободной камеры (G) через настоящий ввод.
+- `--walk=<сек> [--walk_delay=с] [--run]` — встать лицом к `<место>_c` и идти вперёд, печатая высоту/ранение (`WALK …`);
+  `--hurt=0..1` — ранение на старте; `--blackout` — отключение света через 3 с (печатает `POWER …`);
+  `--tour_prefix=find_` — тур по находкам; места `hole_<k>`/`find_<вид>_<k>` (+ `_c` — точка, куда смотреть).
 - `tools/dev/aabb.gd` — габариты моделей (`--headless --script`).
 
 ## Архитектура (src/)
@@ -43,6 +47,19 @@ Found-footage хоррор по лору Backrooms Кейна Парсонса (
 - `world/worldgen_rooms.gd` — каталог «странных комнат» (PLAN: тип, слой, количество, кольцо расстояний, размер) и
   `sprinkle` — мелочи по миру понемногу; места пишутся в `places["room_<тип>_<k>"]`. Строители предметов этих комнат —
   `world/props_rooms.gd` (Props делегирует туда неизвестные виды). `world/tv.gd` (TVHub) — телеканалы 2D-SubViewport.
+- Высота пола по клеткам: `fh` (дм от floor_y), `ramp` (1..4 — пандус к стороне d+1, 5..8 — лестница). Пол/обрывы/стены до дна
+  и наклонные коллизии строит `chunk_builder` (`_ramp`, `_drop_face`); проходимость по высоте — `step_ok` (обрывы > 0,4 м
+  непроходимы для ИИ, бота и кабелей). `LD.ground(p)` — пол под точкой (монстры стоят на нём). Потолок по умолчанию `LD.CEIL`=32;
+  комнаты, где вещи держатся за потолок, ставят 27. Предметы «в потолке» берут `d.ceil` (`Complex.ceil_at`).
+  Конструкции (котлован, терраса, пропасть, лестница вниз, пандус, дыры, балконы, высокий зал, колодец) и редкие провалы
+  в коридорах — `worldgen_rooms.gd`; находки (химзащита, одежда, камера на штативе, следы волочения, дверь, ночёвка) —
+  `sprinkle_finds`. Неглубокие провалы ≤ 1,5 м: герой подтягивается на уступ (player `_try_mantle`); глубже 7 м — смерть.
+- Ранение без полоски: `Complex.hurt` 0..1 → `main.hurt` → `vhs.gdshader` (красное от краёв), падение с высоты считается
+  в `_on_landed`; в яму на нижний слой и при приземлении из парка — без урона (`_no_fall_t`).
+- Свет: группы мигания `posmod(x*7+z*13, 7)` с характерами (`FLICK_KIND`), звук ближайшей лампы; питание `g_power`
+  (просадки и редкие отключения, `_update_power`). Только жёлтые обои: зон «старое крыло», бетон, плитка в мире нет.
+- Концовки (`scenes/endings.gd`): смерть везде через красное (`_hurt_tick` → `_death` → карточка): океан (плыть вверх),
+  небо → лес, подвал (люк ранит), шоссе, стена, космос (смотреть на Землю), Async (газ в изоляторе, вид с пола).
 - `layer_data.used`: 1 — особая комната (сюда не ставятся случайные копии/предметы из `_scatter` и `sprinkle`), 2 — свет задан вручную.
 - `world/complex.gd` — подгрузка чанков, слои, экспозиция, мигание, события (яма → слой 1, лестница Async, Порог, нулевая зона).
 - `world/human.gd` — люди: модель Rocketbox (скелет Bip01/Bip02) или запасной вариант из примитивов (`--prim_humans`).

@@ -53,6 +53,11 @@ func _ready() -> void:
 		"tv":
 			for ch in ["async_ad", "news", "explorers", "home", "weather", "bars"]:
 				items.append({"k": "tv_on", "ch": ch})
+		"finds":
+			items.append({"k": "hazmat", "pose": "slump", "seed": 5, "note": true, "key": "note.a_hz1"})
+			items.append({"k": "hazmat", "pose": "lie", "seed": 9})
+			for f in ["clothes", "tripod_cam", "drag", "lone_door", "lost_camp"]:
+				items.append({"k": f})
 		"async":
 			for w in ["lamp_stand", "case", "case_open", "crate", "table", "spool", "generator", "board", "rover", "cones", "tripod", "radio", "winch"]:
 				items.append({"k": "async", "what": w})

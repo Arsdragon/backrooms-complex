@@ -24,6 +24,8 @@ var _tracking_burst := 0.0
 var stopfx := 0.0
 var bw := 0.0
 var desat := 0.0
+var hurt := 0.0                # ранение 0..1 (красный кадр)
+var hurt_flash := 0.0
 
 
 func _ready() -> void:
@@ -138,6 +140,9 @@ func _process(dt: float) -> void:
 	vhs_mat.set_shader_parameter("stopfx", stopfx)
 	vhs_mat.set_shader_parameter("bw", bw)
 	vhs_mat.set_shader_parameter("desat", desat)
+	hurt_flash = move_toward(hurt_flash, 0.0, dt * 2.2)
+	vhs_mat.set_shader_parameter("hurt", hurt)
+	vhs_mat.set_shader_parameter("hurt_flash", hurt_flash)
 
 
 func screenshot(path: String) -> void:

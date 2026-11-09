@@ -1,6 +1,7 @@
 extends Node3D
-## Концовки. Случайные выходы через нулевую зону: океан, небо, подвал, шоссе, парк спустя годы.
-## Выход Async: газ, люди в костюмах, изолятор под камерой наблюдения, допрос через динамик, навсегда.
+## Концовки. Случайные выходы через нулевую зону всегда смертельны: океан, небо (лес), подвал, шоссе, стена, космос.
+## Выход Async: газ, люди в костюмах, изолятор под камерой наблюдения, допрос — и снова газ.
+## Смерть везде одинакова: кадр краснеет (как от ран), удар — красный экран — карточка.
 
 const Props := preload("res://src/world/props.gd")
 const ParkS := preload("res://src/scenes/park.gd")
@@ -25,6 +26,49 @@ var _lines_left: Array = []
 var _hatch_tries := 0
 var _hatch_busy := false
 var _given_up := -1.0
+var _hurt := 0.0               # красное в кадре 0..1 (Game.main.hurt); 1 — смерть
+var _hurt_rate := 0.0          # сколько прибавляется в секунду
+var _stroke := 0.0
+var _earth: Node3D = null
+var _clouds: Node3D = null
+var _bubbles: GPUParticles3D = null
+var _gas_on := false
+
+const EARTH_C := Vector3(0, -6400, 0)
+const EARTH_R := 6000.0
+const SURF_SHADER := """shader_type spatial;
+render_mode unshaded, cull_disabled;
+uniform sampler2D n : filter_linear_mipmap, repeat_enable;
+void fragment() {
+	vec2 uv = UV * 14.0;
+	float a = texture(n, uv + vec2(TIME * 0.02, TIME * 0.013)).r;
+	float b = texture(n, uv * 1.9 - vec2(TIME * 0.03, -TIME * 0.02)).g;
+	float c = smoothstep(0.4, 0.85, a * 0.55 + b * 0.45);
+	ALBEDO = mix(vec3(0.05, 0.22, 0.25), vec3(0.45, 0.7, 0.68), c);
+}
+"""
+const STARS_SHADER := """shader_type sky;
+float h(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+void sky() {
+	vec3 d = EYEDIR;
+	vec3 q = floor(d * 420.0);
+	float s = h(q);
+	float star = step(0.9983, s) * (0.35 + 0.65 * h(q + 7.0));
+	vec3 col = vec3(star) * mix(vec3(0.8, 0.85, 1.0), vec3(1.0, 0.9, 0.75), h(q + 3.0));
+	if (LIGHT0_ENABLED) {
+		float sd = dot(d, normalize(LIGHT0_DIRECTION));
+		col += vec3(1.0, 0.97, 0.9) * smoothstep(0.9993, 0.9997, sd) * 25.0 + vec3(1.0, 0.9, 0.7) * pow(max(sd, 0.0), 300.0) * 0.5;
+	}
+	COLOR = col;
+}
+"""
+const ATMO_SHADER := """shader_type spatial;
+render_mode unshaded, blend_add, cull_back, depth_draw_never;
+void fragment() {
+	float f = 1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0);
+	ALBEDO = vec3(0.3, 0.55, 1.0) * pow(f, 3.0) * 1.5;
+}
+"""
 
 
 func begin() -> void:
@@ -38,12 +82,15 @@ func begin() -> void:
 	Snd.stop_all(0.1)
 	Snd.play("null_burst", 0.0)
 	Snd.muffle(0.0)
+	# сердце — тише или громче вместе с красным
+	Snd.loop("heart", "heartbeat", 0.0, 0.3)
 	match kind:
 		"ocean": _ocean()
 		"sky": _sky()
 		"basement": _basement()
 		"highway": _highway()
 		"wall": _wall()
+		"space": _space()
 		"async": _async()
 		_: _ocean()
 
@@ -89,126 +136,191 @@ func _apply_look(dt: float) -> void:
 	_look = Vector2.ZERO
 
 
-## Конец записи: «стоп», синий экран, карточка концовки
-func finish(card := "") -> void:
+## Красное прибавляется само (_hurt_rate); дошло до 1 — смерть
+func _hurt_tick(dt: float) -> void:
+	_hurt = clampf(_hurt + _hurt_rate * dt, 0.0, 1.0)
+	if Game.main != null:
+		Game.main.hurt = _hurt
+	Snd.loop_vol("heart", clampf((_hurt - 0.15) * 1.3, 0.0, 1.0), 0.4)
+	if _hurt >= 1.0:
+		_death()
+
+
+## Смерть: удар, кадр целиком красный, гул — и карточка концовки
+func _death(card := "") -> void:
 	if _done:
 		return
 	_done = true
-	Snd.play("tape_stop", -2.0)
+	Snd.stop_all(0.05)
+	Snd.play("death_hit", 2.0)
 	if Game.main != null:
-		var tw := create_tween()
-		tw.tween_method(func(v: float) -> void: Game.main.stopfx = v, 0.0, 1.0, 0.7)
-		await tw.finished
-	await get_tree().create_timer(0.8).timeout
-	Snd.stop_all(0.3)
+		Game.main.hurt = 1.0
+		Game.main.hurt_flash = 1.0
+		Game.main.burst(1.0)
+	await get_tree().create_timer(0.3).timeout
+	if Game.main != null:
+		Game.main.set_fade(Color(0.62, 0.0, 0.0, 1.0))
+		Game.main.osd.shown = false
 	Snd.muffle(0.0)
+	Snd.loop("death_drone", "death_drone", 0.6, 0.5)
+	await get_tree().create_timer(3.4).timeout
+	Snd.stop_loop("death_drone", 1.0)
 	if Game.main != null:
+		Game.main.fade_to(Color(0, 0, 0, 1), 1.0)
+	await get_tree().create_timer(1.1).timeout
+	Snd.stop_all(0.2)
+	if Game.main != null:
+		Game.main.hurt = 0.0
 		Game.main.stopfx = 0.0
 		Game.main.bw = 0.0
 		Game.main.desat = 0.0
-		Game.main.osd.shown = false
+		Game.main.interference = 0.0
 		Game.main.osd.message = ""
 		Game.main.osd.cam_label = ""
-		Game.main.set_fade(Color(0, 0, 0, 1))
 	Game.show_card(card if card != "" else kind)
 
 
 # ======================================================================= ОКЕАН
 
 func _ocean() -> void:
-	var e := _env_base(Color(0.5, 0.56, 0.6))
-	var sky := Sky.new()
-	var sm := ProceduralSkyMaterial.new()
-	sm.sky_top_color = Color(0.22, 0.25, 0.29)
-	sm.sky_horizon_color = Color(0.45, 0.48, 0.5)
-	sm.ground_horizon_color = Color(0.3, 0.36, 0.38)
-	sm.ground_bottom_color = Color(0.08, 0.12, 0.14)
-	sky.sky_material = sm
-	e.background_mode = Environment.BG_SKY
-	e.sky = sky
-	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	var e := _env_base(Color(0.0, 0.035, 0.05))
+	e.ambient_light_color = Color(0.06, 0.14, 0.16)
 	e.fog_enabled = true
-	e.fog_light_color = Color(0.38, 0.41, 0.43)
-	e.fog_density = 0.0035
+	e.fog_light_color = Color(0.015, 0.09, 0.11)
+	e.fog_density = 0.075
 	var sun := DirectionalLight3D.new()
-	sun.rotation = Vector3(-0.35, 0.8, 0)
-	sun.light_energy = 0.5
+	sun.rotation = Vector3(-1.35, 0.4, 0)
+	sun.light_color = Color(0.55, 0.85, 0.9)
+	sun.light_energy = 0.7
 	add_child(sun)
-	var water := MeshInstance3D.new()
+	# поверхность снизу: светлая рябь далеко над головой
+	var surf := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
-	pm.size = Vector2(600, 600)
-	pm.subdivide_width = 160
-	pm.subdivide_depth = 160
-	water.mesh = pm
-	var wm := ShaderMaterial.new()
-	wm.shader = WATER
-	wm.set_shader_parameter("noise_tex", Mats.tex("water_n"))
-	water.material_override = wm
-	add_child(water)
-	# снизу — тёмная толща
-	var under := MeshInstance3D.new()
-	var um := PlaneMesh.new()
-	um.size = Vector2(600, 600)
-	under.mesh = um
-	under.position.y = -60.0
-	var umat := StandardMaterial3D.new()
-	umat.albedo_color = Color(0.0, 0.03, 0.04)
-	umat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	under.material_override = umat
-	add_child(under)
-	_make_cam(Vector3(0, 6.0, 0))
-	_vel = Vector3(0, -1.0, 0)
-	_phase = 0
-	Snd.loop("sea", "sea_waves", 0.9, 0.3)
-	Snd.loop("wind", "wind_open", 0.5, 0.3)
+	pm.size = Vector2(400, 400)
+	surf.mesh = pm
+	var sh := Shader.new()
+	sh.code = SURF_SHADER
+	var sm := ShaderMaterial.new()
+	sm.shader = sh
+	sm.set_shader_parameter("n", Mats.tex("water_n"))
+	surf.material_override = sm
+	add_child(surf)
+	# косые лучи света сквозь толщу
+	var gt := GradientTexture2D.new()
+	var gr := Gradient.new()
+	gr.colors = PackedColorArray([Color(1, 1, 1, 0.0), Color(1, 1, 1, 1.0), Color(1, 1, 1, 0.0)])
+	gr.offsets = PackedFloat32Array([0.0, 0.5, 1.0])
+	gt.gradient = gr
+	gt.fill_from = Vector2(0, 0.5)
+	gt.fill_to = Vector2(1, 0.5)
+	var rm := StandardMaterial3D.new()
+	rm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	rm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	rm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	rm.albedo_color = Color(0.45, 0.85, 0.9, 0.07)
+	rm.albedo_texture = gt
+	rm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	rm.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y
+	var rr := RandomNumberGenerator.new()
+	rr.seed = 1991
+	for k in 9:
+		var ray := MeshInstance3D.new()
+		var q := QuadMesh.new()
+		q.size = Vector2(rr.randf_range(1.5, 4.0), 40.0)
+		ray.mesh = q
+		ray.material_override = rm
+		var a := rr.randf() * TAU
+		var r := rr.randf_range(5.0, 16.0)
+		ray.position = Vector3(cos(a) * r, -16.0, sin(a) * r)
+		add_child(ray)
+	# взвесь вокруг камеры
+	_make_cam(Vector3(0, -18.0, 0))
+	var specks := _particles(260, 9.0, Vector3(10, 6, 10), Color(0.7, 0.9, 0.85, 0.3), 0.025, Vector3(0, 0.03, 0))
+	specks.local_coords = false
+	cam.add_child(specks)
+	_bubbles = _particles(40, 2.5, Vector3(0.25, 0.1, 0.25), Color(0.85, 1.0, 1.0, 0.45), 0.025, Vector3(0, 1.4, 0))
+	_bubbles.local_coords = false
+	_bubbles.emitting = false
+	_bubbles.one_shot = true
+	_bubbles.position = Vector3(0, -0.35, -0.9)
+	cam.add_child(_bubbles)
+	_pitch = 0.55
+	_vel = Vector3(0, -0.6, 0)
+	_hurt_rate = 0.022
+	Snd.loop("under", "under_rumble", 0.8, 0.5)
+	Snd.muffle(0.85, true)
+	Snd.play("bubbles", -2.0)
+	if Game.main != null:
+		Game.main.desat = 0.3
+		Game.main.subs.say(Loc.t("ui.swim"), 6.0)
+
+
+## Простые частицы-квадратики: взвесь в воде, пузыри
+func _particles(n: int, life: float, box: Vector3, col: Color, size: float, vel: Vector3) -> GPUParticles3D:
+	var gp := GPUParticles3D.new()
+	gp.amount = n
+	gp.lifetime = life
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	pm.emission_box_extents = box
+	pm.direction = vel.normalized() if vel.length() > 0.001 else Vector3.UP
+	pm.spread = 25.0
+	pm.initial_velocity_min = vel.length() * 0.6
+	pm.initial_velocity_max = vel.length() * 1.2
+	pm.gravity = Vector3.ZERO
+	pm.scale_min = 0.6
+	pm.scale_max = 1.4
+	gp.process_material = pm
+	var q := QuadMesh.new()
+	q.size = Vector2(size, size)
+	var qm := StandardMaterial3D.new()
+	qm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	qm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	qm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	qm.albedo_color = col
+	qm.albedo_texture = _dot_tex()
+	q.material = qm
+	gp.draw_pass_1 = q
+	return gp
+
+
+## Круглое мягкое пятнышко (для пузырей, взвеси, газа)
+func _dot_tex() -> GradientTexture2D:
+	var gt := GradientTexture2D.new()
+	var gr := Gradient.new()
+	gr.colors = PackedColorArray([Color(1, 1, 1, 1), Color(1, 1, 1, 0)])
+	gt.gradient = gr
+	gt.fill = GradientTexture2D.FILL_RADIAL
+	gt.fill_from = Vector2(0.5, 0.5)
+	gt.fill_to = Vector2(1.0, 0.5)
+	gt.width = 32
+	gt.height = 32
+	return gt
 
 
 func _ocean_tick(dt: float) -> void:
-	var wave := _wave_h(cam.position)
-	match _phase:
-		0:
-			_vel.y -= 9.8 * dt
-			cam.position += _vel * dt
-			cam.rotation = Vector3(-0.5 - t * 0.3, 0.3, 0.2 * sin(t * 3.0))
-			if cam.position.y < wave:
-				_phase = 1
-				Snd.play("splash", 2.0)
-				if Game.main != null:
-					Game.main.burst(1.0)
-				_vel = Vector3(0, -3.0, 0)
-		1:
-			# под водой, всплываем
-			_vel.y = move_toward(_vel.y, 1.2, dt * 2.0)
-			cam.position += _vel * dt
-			_free_look = true
-			cam.rotation = Vector3(_pitch, _yaw, 0)
-			if cam.position.y > wave + 0.1 and t > 4.0:
-				_phase = 2
-				Snd.play("gasp", -2.0)
-		2:
-			cam.position.y = lerpf(cam.position.y, wave + 0.25 + sin(t * 1.3) * 0.15, dt * 3.0)
-			cam.rotation = Vector3(_pitch + sin(t * 0.9) * 0.08, _yaw, sin(t * 0.7) * 0.12)
-			if randf() < dt * 0.25:
-				Snd.play("splash_small", -8.0)
-			if t > 34.0:
-				_phase = 3
-				Game.main.osd.battery = 0.1
-		3:
-			cam.position.y -= dt * 0.8
-			cam.rotation = Vector3(_pitch + 0.2, _yaw, sin(t) * 0.2)
-			if t > 42.0:
-				finish()
-	var underwater := cam.position.y < _wave_h(cam.position) - 0.05
-	Snd.muffle(0.85 if underwater else 0.0, true)
-	env.fog_density = 0.25 if underwater else 0.0035
-	env.fog_light_color = Color(0.05, 0.16, 0.17) if underwater else Color(0.38, 0.41, 0.43)
+	var up := Input.is_action_pressed("move_f") or Input.is_action_pressed("fly_up") or Cfg.has_arg("auto")
+	var strength := clampf(1.15 - _hurt * 1.25, 0.0, 1.0)
+	_stroke -= dt
+	if up and strength > 0.05:
+		_vel.y = move_toward(_vel.y, 0.9 * strength, dt * 1.2)
+		_hurt_rate = 0.025
+		if _stroke <= 0.0:
+			_stroke = randf_range(1.0, 1.6)
+			Snd.play("bubbles", -10.0, randf_range(0.9, 1.1))
+			_bubbles.restart()
+	else:
+		_vel.y = move_toward(_vel.y, -0.5, dt * 0.7)
+		_hurt_rate = 0.02
+	# у поверхности свет близко, но воздух кончается быстрее — не дотянуться
+	if cam.position.y > -6.0:
+		_hurt_rate += 0.035
+	cam.position += _vel * dt
+	cam.position.y = minf(cam.position.y, -2.2)
+	cam.rotation = Vector3(_pitch + sin(t * 0.8) * 0.04, _yaw, sin(t * 0.6) * 0.05 + _hurt * 0.15 * sin(t * 2.1))
 	if Game.main != null:
-		Game.main.desat = 0.3 if underwater else 0.0
-
-
-func _wave_h(p: Vector3) -> float:
-	var tt := t
-	return sin(p.x * 0.08 + tt * 0.9) * 0.6 + sin(p.z * 0.11 + tt * 1.3) * 0.45 + sin((p.x + p.z) * 0.21 + tt * 1.9) * 0.2
+		Game.main.interference = _hurt * 0.25
+		Game.main.desat = 0.3 + _hurt * 0.3
 
 
 # ======================================================================= НЕБО
@@ -225,20 +337,54 @@ func _sky() -> void:
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	e.fog_enabled = true
 	e.fog_light_color = Color(0.72, 0.78, 0.86)
-	e.fog_density = 0.0009
+	e.fog_density = 0.00015
+	e.fog_light_color = Color(0.55, 0.66, 0.8)
 	var sun := DirectionalLight3D.new()
 	sun.rotation = Vector3(-0.9, 0.5, 0)
 	add_child(sun)
+	# внизу — сплошной лес: кроны до горизонта
 	var g := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
-	pm.size = Vector2(4000, 4000)
+	pm.size = Vector2(6000, 6000)
 	g.mesh = pm
 	var gm := StandardMaterial3D.new()
-	gm.albedo_texture = Mats.tex("suburb")
-	gm.uv1_scale = Vector3(6, 6, 1)
+	gm.albedo_color = Color(0.16, 0.3, 0.12)
+	gm.albedo_texture = Mats.tex("leaves")
+	gm.uv1_scale = Vector3(600, 600, 1)
 	gm.roughness = 1.0
 	g.material_override = gm
 	add_child(g)
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.0
+	cone.bottom_radius = 2.6
+	cone.height = 9.0
+	cone.radial_segments = 7
+	cone.rings = 1
+	var tm := StandardMaterial3D.new()
+	tm.vertex_color_use_as_albedo = true
+	tm.albedo_texture = Mats.tex("leaves")
+	tm.uv1_triplanar = true
+	tm.uv1_scale = Vector3(0.3, 0.3, 0.3)
+	tm.roughness = 1.0
+	cone.material = tm
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.mesh = cone
+	mm.instance_count = 7000
+	var tr := RandomNumberGenerator.new()
+	tr.seed = 1996
+	for i in mm.instance_count:
+		var p := Vector3(tr.randf_range(-380, 380), 0, tr.randf_range(-380, 380))
+		if i == 0:
+			p = Vector3(0.6, 0, 0.4)
+		var sc := tr.randf_range(0.7, 1.5)
+		var bas := Basis(Vector3.UP, tr.randf() * TAU).scaled(Vector3(sc, sc * tr.randf_range(0.9, 1.3), sc))
+		mm.set_instance_transform(i, Transform3D(bas, p + Vector3(0, 4.5 * sc, 0)))
+		mm.set_instance_color(i, Color(0.12, 0.3, 0.1).lerp(Color(0.26, 0.38, 0.13), tr.randf()))
+	var trees := MultiMeshInstance3D.new()
+	trees.multimesh = mm
+	add_child(trees)
 	# облака-клочья
 	var cm := StandardMaterial3D.new()
 	cm.albedo_color = Color(0.95, 0.96, 1.0, 0.22)
@@ -254,26 +400,31 @@ func _sky() -> void:
 		c.mesh = s
 		c.material_override = cm
 		c.scale = Vector3(rng.randf_range(40, 110), rng.randf_range(6, 14), rng.randf_range(40, 110))
-		c.position = Vector3(rng.randf_range(-500, 500), rng.randf_range(250, 900), rng.randf_range(-500, 500))
+		c.position = Vector3(rng.randf_range(-700, 700), rng.randf_range(560, 1000), rng.randf_range(-700, 700))
 		add_child(c)
-	_make_cam(Vector3(0, 1300, 0))
-	_vel = Vector3(0, -8.0, 0)
+	_make_cam(Vector3(0, 470, 0))
+	_vel = Vector3(0, -18.0, 0)
+	_pitch = -0.6
 	Snd.loop("wind", "wind_fall", 1.0, 0.2)
 
 
 func _sky_tick(dt: float) -> void:
-	_vel.y = maxf(_vel.y - 9.8 * dt, -55.0)
+	_vel.y = maxf(_vel.y - 9.8 * dt, -52.0)
 	cam.position += _vel * dt
-	cam.rotation = Vector3(-1.35 + sin(t * 1.7) * 0.35, t * 0.9, sin(t * 2.3) * 0.5)
+	# кувыркает, но смотреть можно: внизу всё ближе лес
+	var tumble := Vector3(sin(t * 1.3) * 0.3, t * 0.55, sin(t * 2.1) * 0.45)
+	cam.rotation = Vector3(clampf(_pitch - 0.4, -1.5, 0.6) + tumble.x, _yaw + tumble.y, tumble.z)
+	var alt := cam.position.y
+	_hurt = maxf(_hurt, clampf((240.0 - alt) / 300.0, 0.0, 0.75))
 	if Game.main != null:
 		Game.main.osd.shown = true
-	if cam.position.y < 140.0:
-		if Game.main != null:
-			Game.main.interference = 1.0
-		Snd.play("impact_far", 0.0)
-		cam.position.y = 140.0
+		Game.main.interference = clampf((120.0 - alt) / 120.0, 0.0, 0.5)
+	if alt < 11.0:
+		cam.position.y = 11.0
 		_vel = Vector3.ZERO
-		finish()
+		Snd.play("branches", 4.0)
+		Snd.play("body_fall", 4.0)
+		_death("sky")
 
 
 # ======================================================================= ПОДВАЛ
@@ -427,6 +578,10 @@ func _try_hatch() -> void:
 			player.shake = 0.5
 			await get_tree().create_timer(0.4).timeout
 	Game.say("sub.hatch%d" % mini(n, 5))
+	# сбитые в кровь руки
+	_hurt = minf(_hurt + 0.06 + n * 0.025, 0.7)
+	if Game.main != null:
+		Game.main.hurt_flash = 0.5
 	Snd.loop_vol("upstairs", 0.55, 0.5)
 	player.frozen = false
 	_hatch_busy = false
@@ -440,6 +595,7 @@ func _try_hatch() -> void:
 		tw.tween_property(player.cam, "rotation", Vector3(-0.35, 0.0, 0.08), 2.5)
 		await get_tree().create_timer(4.0).timeout
 		Game.say("sub.hatch6")
+		_hurt_rate = 0.032
 
 
 func _basement_tick(_dt: float) -> void:
@@ -468,8 +624,8 @@ func _basement_tick(_dt: float) -> void:
 		if gt > 12.0 and lamp != null:
 			lamp.visible = false
 			(get_node("BulbMesh") as Node3D).visible = false
-		if gt > 16.0:
-			finish()
+		if _hurt_rate < 0.03:
+			_hurt_rate = 0.032
 
 
 # ======================================================================= ШОССЕ
@@ -636,6 +792,7 @@ func _highway_tick(dt: float) -> void:
 			Snd.play_at("brakes", truck.position, self, 4.0, 1.0, 300.0, 25.0)
 		if Game.main != null:
 			Game.main.gain = clampf(1.0 + (truck.position.z + 120.0) / 40.0, 1.0, 3.5)
+		_hurt = maxf(_hurt, clampf((truck.position.z + 90.0) / 120.0, 0.0, 0.55))
 		if truck.position.z > player.global_position.z - 10.0:
 			# удар: запись обрывается
 			Snd.play("death_hit", 4.0)
@@ -643,7 +800,7 @@ func _highway_tick(dt: float) -> void:
 			if Game.main != null:
 				Game.main.interference = 1.0
 			truck.position.z = player.global_position.z - 10.0
-			finish()
+			_death("highway")
 
 
 # ======================================================================= СТЕНА
@@ -703,6 +860,7 @@ func _wall() -> void:
 	player.shake = 1.0
 	Snd.loop("neighbors", "upstairs_tv", 0.75, 2.0)
 	Snd.play("thud_land", -2.0)
+	_hurt_rate = 0.016
 
 
 func _wall_tick(_dt: float) -> void:
@@ -720,8 +878,114 @@ func _wall_tick(_dt: float) -> void:
 		Game.main.osd.message = Loc.t("osd.battery")
 	if t > 50.0 and lt != null:
 		lt.light_energy = maxf(0.0, lt.light_energy - _dt * 0.3)
-	if t > 58.0:
-		finish()
+
+
+# ======================================================================= КОСМОС
+
+## Открытый космос на орбите: тишина, звёзды, Земля во весь низ кадра. Пока смотришь на неё — краснеет быстрее
+func _space() -> void:
+	var e := _env_base(Color(0, 0, 0))
+	var sky := Sky.new()
+	var ssh := Shader.new()
+	ssh.code = STARS_SHADER
+	var smat := ShaderMaterial.new()
+	smat.shader = ssh
+	sky.sky_material = smat
+	e.background_mode = Environment.BG_SKY
+	e.sky = sky
+	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	e.ambient_light_color = Color(0.02, 0.025, 0.035)
+	e.glow_intensity = 0.8
+	var sun := DirectionalLight3D.new()
+	sun.rotation = Vector3(-0.25, 2.3, 0)
+	sun.light_energy = 2.2
+	sun.light_color = Color(1.0, 0.97, 0.92)
+	add_child(sun)
+	# Земля: океаны, суша, льды; облака; голубой ободок атмосферы
+	var fn := FastNoiseLite.new()
+	fn.seed = 1990
+	fn.frequency = 0.0065
+	fn.fractal_octaves = 7
+	var nt := NoiseTexture2D.new()
+	nt.width = 2048
+	nt.height = 1024
+	nt.seamless = true
+	nt.noise = fn
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.0, 0.5, 0.53, 0.56, 0.68, 0.8, 0.9])
+	grad.colors = PackedColorArray([Color(0.02, 0.06, 0.2), Color(0.04, 0.16, 0.4), Color(0.55, 0.55, 0.42), Color(0.15, 0.3, 0.11),
+		Color(0.35, 0.3, 0.18), Color(0.45, 0.4, 0.33), Color(0.92, 0.93, 0.95)])
+	nt.color_ramp = grad
+	var em := StandardMaterial3D.new()
+	em.albedo_texture = nt
+	em.roughness = 0.75
+	_earth = _sphere(EARTH_R, em, 192)
+	var fc := FastNoiseLite.new()
+	fc.seed = 77
+	fc.frequency = 0.018
+	fc.fractal_octaves = 5
+	var ct := NoiseTexture2D.new()
+	ct.width = 1024
+	ct.height = 512
+	ct.seamless = true
+	ct.noise = fc
+	var cg := Gradient.new()
+	cg.offsets = PackedFloat32Array([0.0, 0.52, 0.7])
+	cg.colors = PackedColorArray([Color(1, 1, 1, 0.0), Color(1, 1, 1, 0.0), Color(1, 1, 1, 0.9)])
+	ct.color_ramp = cg
+	var cm := StandardMaterial3D.new()
+	cm.albedo_texture = ct
+	cm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	cm.roughness = 1.0
+	_clouds = _sphere(EARTH_R + 25.0, cm, 192)
+	var ash := Shader.new()
+	ash.code = ATMO_SHADER
+	var am := ShaderMaterial.new()
+	am.shader = ash
+	_sphere(EARTH_R + 120.0, am, 192)
+	_make_cam(Vector3.ZERO)
+	cam.far = 20000.0
+	_pitch = -0.32
+	_yaw = 0.4
+	_hurt_rate = 0.022
+	Snd.stop_all(0.0)
+	Snd.loop("heart", "heartbeat", 0.0, 0.3)
+	Snd.loop("space", "space_tone", 0.8, 1.5)
+	Snd.muffle(0.55, true)
+	if Game.main != null:
+		Game.main.gain = 1.2
+
+
+func _sphere(r: float, mat: Material, seg: int) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = r
+	sm.height = r * 2.0
+	sm.radial_segments = seg
+	sm.rings = seg / 2
+	mi.mesh = sm
+	mi.material_override = mat
+	mi.position = EARTH_C
+	# под камерой — экватор, а не полюс (у полюса текстура сферы стягивается в точку)
+	mi.rotation = Vector3(PI * 0.5, 0, 0)
+	add_child(mi)
+	return mi
+
+
+func _space_tick(dt: float) -> void:
+	cam.rotation = Vector3(_pitch, _yaw + t * 0.012, sin(t * 0.2) * 0.1 + t * 0.008)
+	var fwd := -cam.global_transform.basis.z
+	var to_e := (EARTH_C - cam.global_position).normalized()
+	var look := clampf((fwd.dot(to_e) - 0.25) / 0.45, 0.0, 1.0)
+	_hurt_rate = 0.02 + look * 0.07
+	if _earth != null:
+		_earth.rotate_object_local(Vector3.UP, dt * 0.002)
+	if _clouds != null:
+		_clouds.rotate_object_local(Vector3.UP, dt * 0.003)
+	if Game.main != null:
+		Game.main.desat = look * 0.25
+	if randf() < dt * 0.25:
+		Snd.play("breath_heavy", -12.0, randf_range(0.9, 1.0))
 
 
 # ======================================================================= ASYNC
@@ -824,13 +1088,24 @@ func _async_tick(dt: float) -> void:
 					Game.main.burst(0.4)
 		6:
 			_cctv_control(dt)
-			if t > 9.0:
+			# в изолятор пускают газ: человек на камере шатается и падает
+			if t > 2.5 and not _gas_on:
+				_gas_on = true
+				_gas_iso()
+			if t > 6.5 and _subject != null and not _subject.has_meta("fell"):
+				_subject.set_meta("fell", true)
+				_subject.pose("slump")
+				var tw := create_tween().set_parallel(true)
+				tw.tween_property(_subject, "rotation:x", -1.45, 0.7).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+				tw.tween_property(_subject, "position:y", 0.12, 0.7)
+				Snd.play("body_fall", 0.0)
+			if t > 10.0:
 				_phase = 7
 				t = 0.0
-				_copy_room()
+				_gas_pov()
 		7:
-			if t > 9.0:
-				finish("async")
+			# лёжа на полу, сквозь газ — лампа и решётка вентиляции; кадр краснеет
+			cam.rotation = Vector3(1.35 + sin(t * 0.7) * 0.05, 0.2 + sin(t * 0.4) * 0.05, 0.4)
 
 
 func _gas() -> void:
@@ -1038,89 +1313,40 @@ func _cctv_control(dt: float) -> void:
 			Snd.play("door_rattle", 0.0)
 
 
-## Последний кадр: камера в Комплексе, копия героя на стуле под мигающей лампой
-func _copy_room() -> void:
-	for ch in get_children():
-		ch.queue_free()
-	_subject = null
-	Snd.stop_all(0.1)
-	Snd.play("cam_switch", -4.0)
-	_env_base(Color(0, 0, 0))
-	env.ambient_light_color = Color(0.05, 0.05, 0.04)
-	var wall := StandardMaterial3D.new()
-	wall.albedo_texture = Mats.tex("wall_yellow_dirty")
-	wall.uv1_triplanar = true
-	wall.uv1_scale = Vector3(1.2, 1.2, 1.2)
-	var carpet := StandardMaterial3D.new()
-	carpet.albedo_texture = Mats.tex("carpet_wet")
-	carpet.uv1_triplanar = true
-	carpet.uv1_scale = Vector3(0.7, 0.7, 0.7)
-	var ceil_m := StandardMaterial3D.new()
-	ceil_m.albedo_texture = Mats.tex("ceiling_tile")
-	ceil_m.uv1_triplanar = true
-	ceil_m.uv1_scale = Vector3(0.8, 0.8, 0.8)
-	_box(self, Vector3(6, 0.2, 6), Vector3(0, -0.1, 0), carpet, false)
-	_box(self, Vector3(6, 0.2, 6), Vector3(0, 2.8, 0), ceil_m, false)
-	_box(self, Vector3(0.2, 2.7, 6), Vector3(-3, 1.35, 0), wall, false)
-	_box(self, Vector3(6, 2.7, 0.2), Vector3(0, 1.35, -3), wall, false)
-	_box(self, Vector3(0.2, 2.7, 6), Vector3(3, 1.35, 0), wall, false)
-	var lamp := OmniLight3D.new()
-	lamp.name = "Lamp"
-	lamp.position = Vector3(0, 2.55, -0.5)
-	lamp.light_color = Color(1.0, 0.95, 0.75)
-	lamp.omni_range = 6.0
-	add_child(lamp)
-	var ch := Node3D.new()
-	add_child(ch)
-	Props._chair(ch)
-	ch.position = Vector3(0, 0, -0.8)
-	for c in ch.get_children():
-		if c is MeshInstance3D:
-			var m := StandardMaterial3D.new()
-			m.albedo_color = Color(0.85, 0.84, 0.8)
-			(c as MeshInstance3D).material_override = m
-	var copy := Human.make("player", 77, false)
-	add_child(copy)
-	copy.position = Vector3(0, -0.02, -0.8)
-	copy.pose("slump")
-	copy.react = false
-	_paleify(copy)
-	_make_cam(Vector3(2.6, 2.6, 2.4))
-	cam.look_at(Vector3(0, 0.9, -0.8))
-	cam.fov = 70.0
+## Газ из вентиляции изолятора (видно с камеры наблюдения)
+func _gas_iso() -> void:
+	Snd.play("gas_hiss", 2.0)
+	Snd.play("alarm_short", -8.0)
+	var gp := _particles(220, 5.0, Vector3(1.5, 0.05, 1.8), Color(0.92, 0.94, 0.92, 0.25), 1.6, Vector3(0, -0.4, 0))
+	gp.position = Vector3(0, 2.45, 0)
+	add_child(gp)
+	env.fog_enabled = true
+	env.fog_light_color = Color(0.85, 0.87, 0.85)
+	env.fog_density = 0.0
+	var tw := create_tween()
+	tw.tween_property(env, "fog_density", 0.2, 9.0)
 	if Game.main != null:
-		Game.main.osd.cam_label = Loc.t("osd.cam_complex")
-		Game.main.bw = 0.85
-	Snd.loop("hum", "hum_fluor", 0.6, 0.5)
-	_subject = copy
+		var tw2 := create_tween()
+		tw2.tween_method(func(v: float) -> void: Game.main.interference = v, 0.05, 0.3, 7.0)
 
 
-func _paleify(n: Node) -> void:
-	if n is MeshInstance3D and (n as MeshInstance3D).material_override == null and (n as MeshInstance3D).mesh != null:
-		var mm := n as MeshInstance3D
-		for i in mm.mesh.get_surface_count():
-			var src2 := mm.get_active_material(i) as StandardMaterial3D
-			if src2 != null:
-				var m3 := src2.duplicate() as StandardMaterial3D
-				m3.albedo_color = Color(1, 1, 1).lerp(Color(0.95, 0.9, 0.85), 0.5)
-				m3.albedo_texture = src2.albedo_texture
-				var m4 := m3
-				m4.emission_enabled = true
-				m4.emission = Color(0.25, 0.24, 0.22)
-				mm.set_surface_override_material(i, m4)
-	elif n is MeshInstance3D:
-		var mi := n as MeshInstance3D
-		var src := mi.material_override as StandardMaterial3D
-		var m := StandardMaterial3D.new()
-		var c := src.albedo_color if src != null else Color(1, 1, 1)
-		m.albedo_color = c.lerp(Color(0.88, 0.85, 0.78), 0.65)
-		if src != null and src.albedo_texture != null and src.albedo_texture == Mats.tex("face"):
-			m.albedo_texture = Mats.tex("face_smear")
-			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-		m.roughness = 1.0
-		mi.material_override = m
-	for ch in n.get_children():
-		_paleify(ch)
+## От первого лица: герой на полу изолятора, вверху газ и лампа; снова цветная запись камеры
+func _gas_pov() -> void:
+	if _subject != null:
+		_subject.visible = false
+	_subject = null
+	_cctv = false
+	_make_cam(Vector3(0.1, 0.22, 0.6))
+	cam.fov = Cfg.fov
+	if Game.main != null:
+		Game.main.bw = 0.0
+		Game.main.desat = 0.45
+		Game.main.osd.cam_label = ""
+		Game.main.burst(0.6)
+	Snd.muffle(0.7, true)
+	Snd.play("gasp", -6.0)
+	_hurt = 0.35
+	_hurt_rate = 0.085
 
 
 func Mats_std(c: Color) -> StandardMaterial3D:
@@ -1162,11 +1388,6 @@ func _process(dt: float) -> void:
 		"basement": _basement_tick(dt)
 		"highway": _highway_tick(dt)
 		"wall": _wall_tick(dt)
+		"space": _space_tick(dt)
 		"async": _async_tick(dt)
-	if kind == "async" and _phase == 7 and _subject != null:
-		var lamp := get_node_or_null("Lamp") as OmniLight3D
-		if lamp != null:
-			lamp.light_energy = 1.2 if randf() > 0.08 else randf_range(0.0, 0.5)
-		if t > 4.0:
-			var head: Node3D = _subject.j["head"]
-			head.rotation.y = lerpf(head.rotation.y, 0.7, dt * 0.25)
+	_hurt_tick(dt)

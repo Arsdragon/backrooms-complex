@@ -130,6 +130,9 @@ func go_menu() -> void:
 	main.stopfx = 0.0
 	main.bw = 0.0
 	main.desat = 0.0
+	main.hurt = 0.0
+	main.hurt_flash = 0.0
+	RenderingServer.global_shader_parameter_set("g_power", 1.0)
 	main.interference = 0.0
 	main.set_fade(Color(0, 0, 0, 1))
 	main.osd.shown = false
@@ -218,6 +221,7 @@ func fall_from_park() -> void:
 
 func start_complex(lower := false, from_fall := false) -> void:
 	state = "complex"
+	main.hurt = 0.0
 	ComplexS.Props.park_mode = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	var cx := ComplexS.new()
@@ -276,6 +280,37 @@ func start_complex(lower := false, from_fall := false) -> void:
 		main.fade_to(Color(0, 0, 0, 0), 0.6)
 	if Cfg.has_arg("fc_test"):
 		_fc_test()
+	if Cfg.has_arg("walk"):
+		_walk_test(float(Cfg.arg("walk")))
+	if Cfg.has_arg("hurt"):
+		cx.hurt = float(Cfg.arg("hurt"))
+		cx._hurt_cd = 9999.0
+
+
+## Отладка: --walk=<сек> — встать лицом к центру места (--place) и идти вперёд, печатая высоту и ранение
+func _walk_test(sec: float) -> void:
+	await get_tree().create_timer(float(Cfg.arg("walk_delay", "1.5"))).timeout
+	var cx: Node = complex
+	var pl: Player = cx.get("player")
+	var L: LayerData = layers[cx.cur]
+	var key := Cfg.arg("place", "")
+	if L.places.has(key + "_c"):
+		var c: Vector3 = cx.wrap_near(L.places[key + "_c"], pl.global_position)
+		var v := c - pl.global_position
+		pl.set_look(atan2(-v.x, -v.z), 0.0)
+	if Cfg.has_arg("run"):
+		Input.action_press("run")
+	Input.action_press("move_f")
+	var t := 0.0
+	while t < sec:
+		await get_tree().create_timer(0.5).timeout
+		t += 0.5
+		if complex == null or not is_instance_valid(complex):
+			print("WALK t=%.1f state=%s" % [t, state])
+			break
+		print("WALK t=%.1f pos=(%.1f, %.2f, %.1f) hurt=%.2f" % [t, pl.global_position.x, pl.global_position.y, pl.global_position.z, complex.hurt])
+	Input.action_release("move_f")
+	Input.action_release("run")
 
 
 ## Отладка: --fc_test — через 2 с нажать G и 2,5 с лететь вперёд и вверх (проверка свободной камеры)
@@ -392,6 +427,7 @@ func die() -> void:
 	if state != "complex":
 		return
 	state = "dead"
+	print("DIE")
 	Snd.stop_all(0.05)
 	Snd.play("death_hit", 2.0)
 	main.set_fade(Color(0.62, 0.0, 0.0, 1.0))
@@ -417,16 +453,18 @@ func ending(kind: String) -> void:
 	if kind == "null":
 		# случайный выход всегда смертелен
 		var r := randf()
-		if r < 0.24:
+		if r < 0.2:
 			k = "ocean"
-		elif r < 0.48:
+		elif r < 0.38:
 			k = "sky"
-		elif r < 0.68:
+		elif r < 0.55:
 			k = "basement"
-		elif r < 0.84:
+		elif r < 0.7:
 			k = "highway"
-		else:
+		elif r < 0.84:
 			k = "wall"
+		else:
+			k = "space"
 		if Cfg.has_arg("force_end"):
 			k = Cfg.arg("force_end")
 	start_ending(k)

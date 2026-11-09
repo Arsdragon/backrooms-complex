@@ -5,6 +5,7 @@ render_mode unshaded, blend_mix, depth_draw_never, cull_back;
 uniform sampler2D noise_tex : filter_linear_mipmap, repeat_enable;
 global uniform vec4 g_flick_a;
 global uniform vec4 g_flick_b;
+global uniform float g_power;
 global uniform vec4 g_fog;
 global uniform vec4 g_dim;
 global uniform float g_ambient;
@@ -28,7 +29,7 @@ void fragment() {
 	float n1 = texture(noise_tex, uv + vec2(g_time * 0.021, g_time * 0.013)).r;
 	float n2 = texture(noise_tex, uv * 1.9 - vec2(g_time * 0.017, g_time * 0.024)).g;
 	int g = int(lc.a * 8.0 + 0.5);
-	float L = lc.r * 2.0 + lc.g * 2.0 * flick(g) + lc.b * 1.2 + g_ambient;
+	float L = (lc.r * 2.0 + lc.g * 2.0 * flick(g)) * g_power + lc.b * 1.2 + g_ambient;
 	float dd = distance(wpos, g_dim.xyz);
 	L *= 1.0 - g_dim.w * smoothstep(14.0, 2.0, dd) * 0.7;
 	vec3 V = normalize(-VERTEX);

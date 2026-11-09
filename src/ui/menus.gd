@@ -244,12 +244,12 @@ func _build_polygon() -> void:
 	_pbtn(c1, "poly.house", func() -> void: Game.poly_complex(true, "house"))
 	_pbtn(c1, "poly.rooms", func() -> void: show_rooms())
 	var c2 := _poly_col(poly_box, 425, "poly.c_ends")
-	for k in ["ocean", "sky", "basement", "highway", "wall", "async"]:
+	for k in ["ocean", "sky", "basement", "highway", "wall", "space", "async"]:
 		var kk: String = k
 		_pbtn(c2, "poly.e_" + kk, func() -> void: Game.poly_ending(kk))
 	_pbtn(c2, "poly.e_death", func() -> void: Game.poly_death())
 	var c3 := _poly_col(poly_box, 685, "poly.c_beings")
-	for g in ["copies", "copies2", "anim", "lifeform", "objects", "async", "tv", "models"]:
+	for g in ["copies", "copies2", "anim", "lifeform", "finds", "objects", "async", "tv", "models"]:
 		var gg: String = g
 		_pbtn(c3, "poly.g_" + gg, func() -> void: Game.poly_gallery(gg))
 	var c4 := _poly_col(poly_box, 995, "poly.c_funcs")
@@ -302,9 +302,9 @@ func _build_rooms() -> void:
 	t.position = Vector2(60, 30)
 	rooms_box.add_child(t)
 	var cols := []
-	for c in 3:
+	for c in 4:
 		var v := VBoxContainer.new()
-		v.position = Vector2(60 + c * 400, 110)
+		v.position = Vector2(50 + c * 305, 110)
 		v.add_theme_constant_override("separation", 1)
 		rooms_box.add_child(v)
 		cols.append(v)
@@ -315,7 +315,7 @@ func _build_rooms() -> void:
 		var typ: String = row[0]
 		var lower: bool = int(row[1]) == 1
 		var b := _btn("room." + typ, func() -> void: Game.poly_complex(lower, "room_%s_0" % typ), 20)
-		(cols[mini(i / 9, 2)] as VBoxContainer).add_child(b)
+		(cols[mini(i / 9, 3)] as VBoxContainer).add_child(b)
 		i += 1
 	var back := _btn("ui.back", func() -> void: show_polygon(), 24)
 	back.position = Vector2(56, 640)

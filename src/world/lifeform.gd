@@ -506,7 +506,7 @@ func _move(dt: float, pl: Player) -> void:
 		# смотрит в сторону героя
 		var to := pl.global_position - global_position
 		rotation.y = lerp_angle(rotation.y, atan2(to.x, to.z), dt * 0.8)
-	global_position.y = L.floor_y
+	global_position.y = L.ground(global_position)
 
 
 static func _apply_light(n: Node, c: Vector4) -> void:

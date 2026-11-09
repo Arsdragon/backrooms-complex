@@ -357,6 +357,26 @@ func tune(params: Dictionary) -> void:
 				mi.set_surface_override_material(i, m2)
 
 
+## Узел на голове (оси: +y вверх, +z вперёд) — для капюшона, маски
+func head_frame() -> Node3D:
+	if _hands.has("head"):
+		return _hands["head"]
+	var hb := -1
+	for b in _b2j.keys():
+		if _b2j[b] == "head":
+			hb = b
+	if sk == null or hb < 0:
+		return j.get("head")
+	var ba := BoneAttachment3D.new()
+	ba.bone_idx = hb
+	sk.add_child(ba)
+	var fr := Node3D.new()
+	fr.basis = (_arest[hb] as Basis).inverse()
+	ba.add_child(fr)
+	_hands["head"] = fr
+	return fr
+
+
 ## Узел руки для предметов
 func hand(side: String) -> Node3D:
 	if _hands.has(side):

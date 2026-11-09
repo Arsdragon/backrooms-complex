@@ -21,7 +21,8 @@ R = np.random.default_rng(1990)
 LOOPS = {"hum_fluor", "room_tone", "null_hum", "park_ambience", "wind_trees", "water_loop", "jingle", "generator",
          "threshold_hum", "tv_static", "fridge_hum", "radio_static", "tape_whir", "sea_waves", "wind_open", "wind_fall",
          "upstairs_tv", "crickets", "death_drone", "birds_wrong", "jingle_wrong", "music_box", "engine_tick",
-         "vending_hum", "speaker_hiss", "tv_news", "tv_jingle", "tv_home", "clock_tick", "vent_air", "store_muzak", "water_amb"}
+         "vending_hum", "speaker_hiss", "tv_news", "tv_jingle", "tv_home", "clock_tick", "vent_air", "store_muzak", "water_amb",
+         "heartbeat", "under_rumble", "space_tone"}
 
 
 # ----------------------------------------------------------------- базовые кирпичики
@@ -908,13 +909,115 @@ def rooms_sfx():
     save("water_amb", norm(loopify(wa, 1.0), 0.4))
 
 
+def lamps():
+    # щелчок стартера и короткое «жжж» мигающей трубки
+    for i in range(3):
+        sec = 0.6
+        t = T(sec)
+        buzz = (np.sign(np.sin(2 * np.pi * 120 * t)) * 0.4 + np.sin(2 * np.pi * 240 * t) * 0.3) * (R.random(len(t)) < 0.7)
+        env = np.zeros(len(t))
+        at = 0.0
+        while at < sec - 0.05:
+            d = R.uniform(0.02, 0.09)
+            a = int(at * SR)
+            b = int(min(sec, at + d) * SR)
+            env[a:b] = R.uniform(0.3, 1.0) if R.random() < 0.7 else 0.0
+            at += d + R.uniform(0.0, 0.05)
+        click = np.zeros(len(t))
+        for k in range(R.integers(2, 5)):
+            place(click, hp(white(0.01), 2500) * np.exp(-T(0.01) * 400), R.uniform(0, sec - 0.05))
+        save(f"lamp_buzz_{i + 1}", norm(bp(buzz * env, 100, 6000) * 0.6 + click, 0.6))
+    for i in range(3):
+        sec = 1.4
+        t = T(sec)
+        x = np.zeros(len(t))
+        for k in range(R.integers(3, 7)):
+            at = R.uniform(0, 0.9)
+            place(x, hp(white(0.012), 1800) * np.exp(-T(0.012) * 300) * R.uniform(0.5, 1.0), at)
+        hum = (np.sin(2 * np.pi * 120 * t) * 0.3 + np.sin(2 * np.pi * 360 * t) * 0.1) * np.clip((t - 0.8) / 0.4, 0, 1)
+        ping = np.sin(2 * np.pi * R.uniform(2800, 3600) * t) * np.exp(-np.clip(t - 0.82, 0, None) * 18) * (t > 0.82) * 0.25
+        save(f"lamp_start_{i + 1}", norm(x + hum + ping, 0.6))
+
+
+def power_sfx():
+    # гул падает и гаснет, щелчок реле
+    sec = 2.5
+    t = T(sec)
+    f = np.interp(t, [0, 1.6, 2.5], [120, 70, 40])
+    hum = (np.sin(2 * np.pi * np.cumsum(f) / SR) * 0.5 + np.sin(2 * np.pi * np.cumsum(f * 2) / SR) * 0.25) * np.clip(1.0 - t / 1.8, 0, 1) ** 1.5
+    thunk = np.sin(2 * np.pi * 70 * t) * np.exp(-t * 14) * 0.8 + hp(white(sec), 1500) * np.exp(-t * 60) * 0.4
+    save("power_down", norm(reverb(hum + thunk, 1.8, 0.4), 0.8))
+    # просадка: гул «спотыкается»
+    sec = 1.2
+    t = T(sec)
+    am = 0.5 + 0.5 * np.sign(np.sin(2 * np.pi * 9 * t + R.uniform(0, 3)))
+    hum = (np.sin(2 * np.pi * 120 * t) * 0.5 + np.sin(2 * np.pi * 240 * t) * 0.25) * (0.3 + 0.7 * am) * adsr(len(t), 0.02, 0.1, 0.8, 0.3)
+    save("power_dip", norm(bp(hum, 80, 3000) + hp(white(sec), 3000) * 0.02, 0.55))
+    # включение: щелчки реле, стартеры, нарастающий гул
+    sec = 2.6
+    t = T(sec)
+    x = np.zeros(len(t))
+    place(x, np.sin(2 * np.pi * 90 * T(0.2)) * np.exp(-T(0.2) * 25), 0.0)
+    for k in range(14):
+        place(x, hp(white(0.012), 1800) * np.exp(-T(0.012) * 300) * R.uniform(0.3, 0.9), R.uniform(0.1, 1.6))
+    f = np.interp(t, [0, 1.2, 2.6], [50, 110, 120])
+    hum = (np.sin(2 * np.pi * np.cumsum(f) / SR) * 0.4 + np.sin(2 * np.pi * np.cumsum(f * 3) / SR) * 0.12) * np.clip((t - 0.6) / 1.5, 0, 1)
+    save("power_up", norm(reverb(x + hum, 1.2, 0.3), 0.75))
+
+
+def end_sfx():
+    # сердцебиение (петля): тук-тук
+    sec = 2.0
+    x = np.zeros(int(sec * SR))
+    for at in (0.0, 1.0):
+        for k, (dl, a) in enumerate([(0.0, 1.0), (0.24, 0.7)]):
+            tt = T(0.18)
+            beat = np.sin(2 * np.pi * np.interp(tt, [0, 0.18], [62, 40]) * tt) * np.exp(-tt * 22) * a
+            place(x, beat, at + dl)
+    save("heartbeat", norm(loopify(lp(x, 300), 0.05), 0.85))
+    # пузыри выдоха
+    for i in range(3):
+        sec = 1.6
+        x = np.zeros(int(sec * SR))
+        for k in range(R.integers(10, 20)):
+            d = R.uniform(0.03, 0.09)
+            tt = T(d)
+            f0 = R.uniform(300, 900)
+            b = np.sin(2 * np.pi * np.cumsum(np.linspace(f0, f0 * 1.8, len(tt))) / SR) * np.exp(-tt * 40)
+            place(x, b * R.uniform(0.3, 1.0), R.uniform(0, sec - 0.1) ** 1.4)
+        save(f"bubbles_{i + 1}", norm(lp(x, 2500) + lp(pink(sec), 300) * 0.15, 0.7))
+    # глубина: низкий гул и далёкие скрипы
+    sec = 10.0
+    t = T(sec)
+    r = lp(pink(sec), 160) * 1.2 + np.sin(2 * np.pi * 38 * t) * 0.15 * (1 + np.sin(2 * np.pi * 0.11 * t))
+    for k in range(3):
+        place(r, chirp(R.uniform(90, 160), R.uniform(60, 110), 1.2) * 0.15, R.uniform(0, sec - 1.5))
+    save("under_rumble", norm(loopify(r, 1.0), 0.6))
+    # треск веток и удар
+    sec = 2.2
+    t = T(sec)
+    x = np.zeros(len(t))
+    for k in range(40):
+        at = R.uniform(0.0, 0.9) ** 1.5
+        d = R.uniform(0.01, 0.05)
+        place(x, hp(white(d), R.uniform(800, 2500)) * np.exp(-T(d) * 80) * R.uniform(0.3, 1.0), at)
+    thud = np.sin(2 * np.pi * 55 * t) * np.exp(-np.clip(t - 0.95, 0, None) * 9) * (t > 0.95)
+    save("branches", norm(reverb(x + thud * 1.2 + lp(white(sec), 400) * np.exp(-np.clip(t - 0.95, 0, None) * 6) * (t > 0.95) * 0.5, 1.2, 0.25), 0.9))
+    # тишина космоса: звон в ушах и глухой шум крови
+    sec = 8.0
+    t = T(sec)
+    ring = np.sin(2 * np.pi * 6200 * t) * 0.03 * (1 + 0.3 * np.sin(2 * np.pi * 0.3 * t)) + np.sin(2 * np.pi * 4100 * t) * 0.012
+    blood = lp(pink(sec), 120) * 0.6
+    save("space_tone", norm(loopify(ring + blood, 0.8), 0.35))
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     only = sys.argv[1:]
     jobs = [("hum_fluor", hum_fluor), ("room_tone", room_tone), ("null_hum", null_hum), ("null_burst", null_burst),
             ("threshold", threshold_hum), ("threshold_pass", threshold_pass), ("step", steps), ("breath", breath_heavy),
             ("lf_", lifeform), ("st_", stalker), ("copy_", copies), ("misc", misc_complex), ("music", music), ("bird", birds),
-            ("park", park), ("machines", machines), ("outdoors", outdoors), ("sfx", sfx), ("hatch", hatch), ("rooms", rooms_sfx)]
+            ("park", park), ("machines", machines), ("outdoors", outdoors), ("sfx", sfx), ("hatch", hatch), ("rooms", rooms_sfx), ("lamp", lamps), ("power", power_sfx), ("endfx", end_sfx)]
     for name, fn in jobs:
         if only and not any(name.startswith(o) or o.startswith(name) for o in only):
             continue

@@ -14,6 +14,10 @@ const PLAN := [
 	["repeat", 0, 1, 30, 110, 9, 3], ["stairs", -1, 1, 20, 110, 2, 4], ["flooded", -1, 2, 25, 110, 8, 7],
 	["exit", 0, 2, 15, 100, 2, 2], ["storage", -1, 1, 25, 115, 6, 5], ["body", 1, 1, 20, 70, 4, 4],
 	["speakers", 1, 1, 25, 80, 5, 5], ["pool", 1, 1, 30, 80, 8, 6],
+	# перепады высот: залы, провалы, лестницы, пандусы, дыры
+	["sunken", -1, 2, 14, 100, 14, 12], ["terrace", 0, 2, 18, 110, 12, 11], ["chasm", -1, 1, 22, 110, 12, 9],
+	["stairwell", -1, 2, 12, 100, 2, 9], ["ramp", -1, 2, 12, 100, 2, 12], ["holes", -1, 2, 15, 100, 8, 8],
+	["atrium", 0, 1, 26, 120, 12, 12], ["tall_hall", 0, 2, 20, 120, 20, 16], ["well", -1, 1, 30, 120, 12, 12],
 ]
 
 
@@ -29,7 +33,7 @@ static func place_all(L: LayerData, lay: int, origin: Vector2i) -> void:
 		for k in n:
 			var w: int = p[5]
 			var h: int = p[6]
-			if (w == 1 or h == 1 or String(p[0]) == "repeat") and L.rng.randf() < 0.5:
+			if (w == 1 or h == 1 or String(p[0]) in ["repeat", "stairwell", "ramp"]) and L.rng.randf() < 0.5:
 				var t := w
 				w = h
 				h = t
@@ -39,6 +43,13 @@ static func place_all(L: LayerData, lay: int, origin: Vector2i) -> void:
 			call_room(String(p[0]), L, s.x, s.y, w, h, lay)
 			var c := LD.cell_center(s.x + w / 2, s.y + h / 2)
 			L.places["room_%s_%d" % [p[0], k]] = Vector3(c.x, L.floor_y, c.y)
+			L.places["room_%s_%d_c" % [p[0], k]] = Vector3(c.x, L.floor_y + L.fh[LD.idx(s.x + w / 2, s.y + h / 2)] * 0.1, c.y)
+			# у конструкций с перепадом — точка на верхнем краю, у входа
+			if L.places.has("_entry"):
+				L.places["room_%s_%d" % [p[0], k]] = L.places["_entry"]
+				L.places.erase("_entry")
+	sprinkle_holes(L, lay, origin)
+	sprinkle_finds(L, lay, origin)
 
 
 static func call_room(t: String, L: LayerData, x: int, z: int, w: int, h: int, lay: int) -> void:
@@ -69,6 +80,15 @@ static func call_room(t: String, L: LayerData, x: int, z: int, w: int, h: int, l
 		"body": body(L, x, z, w, h)
 		"speakers": speakers(L, x, z, w, h)
 		"pool": pool(L, x, z, w, h)
+		"sunken": sunken(L, x, z, w, h)
+		"terrace": terrace(L, x, z, w, h)
+		"chasm": chasm(L, x, z, w, h)
+		"stairwell": stairwell(L, x, z, w, h)
+		"ramp": ramp_room(L, x, z, w, h)
+		"holes": holes(L, x, z, w, h)
+		"atrium": atrium(L, x, z, w, h)
+		"tall_hall": tall_hall(L, x, z, w, h)
+		"well": well(L, x, z, w, h)
 
 
 # ------------------------------------------------------------ помощники
@@ -191,6 +211,7 @@ static func giant(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 ## Коридор, который сужается, а в конце — крошечная дверь
 static func narrow(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_ceil_all(L, x, z, w, h, 27)
 	var along_z := h > w
 	if along_z:
 		L.wall_s[LD.idx(x, z - 1)] = LD.E_OPEN
@@ -244,6 +265,7 @@ static func chairs(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 ## Перевёртыш: ковёр на потолке, лампы на полу, мебель стоит на потолке
 static func flip(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 	L.stamp_room(x, z, w, h, LD.Z_FLIP, 0)
+	_ceil_all(L, x, z, w, h, 27)
 	L._open_border(x, z, w, h, 1, LD.E_DOOR)
 	L._open_border(x, z, w, h, 3, LD.E_ARCH)
 	_lights(L, x, z, w, h, LD.L_ON)
@@ -258,6 +280,7 @@ static func flip(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 ## Боковая комната: «пол» на стене, мебель стоит на стене
 static func side(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_ceil_all(L, x, z, w, h, 27)
 	L._open_border(x, z, w, h, 0, LD.E_DOOR)
 	_lights(L, x, z, w, h, LD.L_NONE)
 	# свет «с боковой стены»: невидимый источник на высоте у восточной стены
@@ -269,7 +292,7 @@ static func side(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 
 ## Офис из перегородок: ряды «кабинок», мониторы, телефоны
 static func cubicles(L: LayerData, x: int, z: int, w: int, h: int) -> void:
-	L.stamp_room(x, z, w, h, LD.Z_OLD, 0)
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
 	_open(L, x, z, w, h, 3, LD.E_ARCH)
 	_lights(L, x, z, w, h, LD.L_ON, false, true)
 	for i in w:
@@ -350,6 +373,7 @@ static func store(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 ## Место «Обследования света и плит» Async: стремянка, снятая плита и светильник
 static func survey(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 2)
+	_ceil_all(L, x, z, w, h, 27)
 	_lights(L, x, z, w, h, LD.L_ON)
 	L.light[LD.idx(x + 1, z + 1)] = LD.L_HOLE
 	L.add_deco({"k": "survey", "p": _c(L, x + 1, z + 1) + Vector3(0.3, 0, -0.3), "r": 0.0})
@@ -425,6 +449,7 @@ static func repeat(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 ## Лестница, уходящая в потолок
 static func stairs(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_ceil_all(L, x, z, w, h, 27)
 	var horiz := w > h
 	if horiz:
 		L.wall_e[LD.idx(x - 1, z)] = LD.E_ARCH
@@ -466,9 +491,9 @@ static func exit_alcove(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 
 ## Склад: стеллажи, коробки, тележки
 static func storage(L: LayerData, x: int, z: int, w: int, h: int) -> void:
-	L.stamp_room(x, z, w, h, LD.Z_CONCRETE, 0)
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
 	_open(L, x, z, w, h, 2, LD.E_OPEN)
-	_lights(L, x, z, w, h, LD.L_FLICK)
+	_lights(L, x, z, w, h, LD.L_ON)
 	for j in range(1, h, 2):
 		for i in range(1, w - 1, 2):
 			var p := _c(L, x + i, z + j) + Vector3(0.6, 0, 0)
@@ -493,7 +518,7 @@ static func body(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 
 ## Комната громкоговорителей: шёпот и шипение из колонок
 static func speakers(L: LayerData, x: int, z: int, w: int, h: int) -> void:
-	L.stamp_room(x, z, w, h, LD.Z_CONCRETE, 2, LD.E_DOOR)
+	L.stamp_room(x, z, w, h, LD.Z_DARK, 2, LD.E_DOOR)
 	_lights(L, x, z, w, h, LD.L_RED)
 	var m := _mid(L, x, z, w, h)
 	for k in 7:
@@ -504,7 +529,7 @@ static func speakers(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 
 ## Бассейный зал: белая плитка, вода по щиколотку, колонны
 static func pool(L: LayerData, x: int, z: int, w: int, h: int) -> void:
-	L.stamp_room(x, z, w, h, LD.Z_TILE, 3, LD.E_ARCH)
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 3, LD.E_ARCH)
 	for i in w:
 		for j in h:
 			var ci := LD.idx(x + i, z + j)
@@ -568,3 +593,457 @@ static func sprinkle(L: LayerData, lay: int, origin: Vector2i) -> void:
 			elif tv_left > 0 and r < 0.0446 and dist > 20 and zn != LD.Z_CONCRETE:
 				tv_left -= 1
 				L.add_deco({"k": "tv_on", "p": L.wall_point(cx, cz, s, 0.4), "r": LD.dir_yaw(s), "ch": chans[rr.randi_range(0, chans.size() - 1)]})
+
+
+# ------------------------------------------------------------ перепады высот
+
+## Центр клетки на высоте её пола
+static func _cf(L: LayerData, x: int, z: int) -> Vector3:
+	var c := LD.cell_center(x, z)
+	return Vector3(c.x, L.floor_y + L.fh[LD.idx(x, z)] * 0.1, c.y)
+
+
+## Пандус/лестница из клеток cells (по направлению d): высота первой — start (дм), дальше шаг step
+static func _slope(L: LayerData, cells: Array, d: int, start: int, step: int, stairs: bool) -> void:
+	for k in cells.size():
+		var c: Vector2i = cells[k]
+		var i := LD.idx(c.x, c.y)
+		L.fh[i] = start + k * step
+		L.ramp[i] = (d + 5) if stairs else (d + 1)
+
+
+## Перила вдоль ребра клетки (x, z) со стороны d, на высоте её пола
+static func _rail(L: LayerData, x: int, z: int, d: int, broken := false) -> void:
+	var y := L.floor_y + L.fh[LD.idx(x, z)] * 0.1
+	var a: Vector3
+	var yaw := 0.0
+	match d:
+		0:
+			a = Vector3((x + 1) * LD.C - 0.08, y, z * LD.C)
+			yaw = -PI * 0.5
+		1:
+			a = Vector3(x * LD.C, y, (z + 1) * LD.C - 0.08)
+		2:
+			a = Vector3(x * LD.C + 0.08, y, z * LD.C)
+			yaw = -PI * 0.5
+		_:
+			a = Vector3(x * LD.C, y, z * LD.C + 0.08)
+	L.add_deco({"k": "railing", "p": a, "r": yaw, "len": LD.C, "broken": broken})
+
+
+## Отметить точку входа (на ровном полу у края) — туда ведёт полигон
+static func _entry(L: LayerData, x: int, z: int, dx := 0.0, dz := 0.0) -> void:
+	L.places["_entry"] = _cf(L, x, z) + Vector3(dx, 0, dz)
+
+
+static func _ceil_all(L: LayerData, x: int, z: int, w: int, h: int, v: int) -> void:
+	for i in w:
+		for j in h:
+			L.ceil_h[LD.idx(x + i, z + j)] = v
+
+
+## Котлован: огромный зал, середина провалена на 2,4–3,6 м; вниз ведут пандус и лестница, на дне — вода или стул
+static func sunken(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_open(L, x, z, w, h, 4, LD.E_ARCH)
+	_open(L, x, z, w, h, 2, LD.E_OPEN)
+	_ceil_all(L, x, z, w, h, 45)
+	var deep: int = [-24, -30, -36][L.rng.randi_range(0, 2)]
+	var flooded := L.rng.randf() < 0.45
+	for i in w:
+		for j in h:
+			var ci := LD.idx(x + i, z + j)
+			var pit := i >= 2 and i < w - 2 and j >= 2 and j < h - 2
+			if pit:
+				L.fh[ci] = deep
+				if flooded:
+					L.water[ci] = 1
+			L.used[ci] = 2
+			if pit:
+				L.light[ci] = LD.L_ON if (i + j) % 3 == 0 else (LD.L_FLICK if (i * 7 + j) % 11 == 0 else LD.L_NONE)
+			else:
+				L.light[ci] = LD.L_ON if (i + j) % 2 == 0 else LD.L_NONE
+	# пандус (2 клетки шириной) с севера и узкая лестница с юга
+	var rx := x + w / 2 - 1
+	for col in [rx, rx + 1]:
+		var cl := []
+		for k in 3:
+			cl.append(Vector2i(col, z + 2 + k))
+			L.water[LD.idx(col, z + 2 + k)] = 0
+		_slope(L, cl, 1, 0, deep / 3, false)
+	var sx := x + w - 4
+	var st := []
+	for k in 3:
+		st.append(Vector2i(sx, z + h - 3 - k))
+		L.water[LD.idx(sx, z + h - 3 - k)] = 0
+	_slope(L, st, 3, 0, deep / 3, true)
+	# колонны со дна
+	for i in range(4, w - 3, 3):
+		for j in range(4, h - 3, 3):
+			if L.ramp[LD.idx(x + i, z + j)] == 0 and L.ramp[LD.idx(x + i - 1, z + j - 1)] == 0:
+				L.post[LD.idx(x + i, z + j)] = 1
+	if flooded:
+		L.add_deco({"k": "drips", "p": _cf(L, x + w / 2 + 2, z + h / 2), "r": 0.0})
+	else:
+		L.add_deco({"k": "obj", "what": "chair", "p": _cf(L, x + w / 2 + 1, z + h / 2 + 1), "r": L.rng.randf() * TAU, "wrong": "none"})
+	L.add_deco({"k": "obj", "what": "wetsign", "p": _cf(L, x + 1, z + 1) + Vector3(0.4, 0, 0.6), "r": 0.6, "wrong": "none"})
+	_entry(L, rx, z + 1)
+
+
+## Зал с террасой: задняя половина поднята на 2,4 м, к ней — широкая лестница; наверху двери в стену
+static func terrace(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_ceil_all(L, x, z, w, h, 62)
+	for i in w:
+		for j in h:
+			var ci := LD.idx(x + i, z + j)
+			if j < 4:
+				L.fh[ci] = 24
+			L.used[ci] = 2
+			L.light[ci] = LD.L_ON if (i + j) % 2 == 0 else LD.L_NONE
+	var s0 := x + w / 2 - 1
+	for col in range(s0, s0 + 3):
+		_slope(L, [Vector2i(col, z + 6), Vector2i(col, z + 5), Vector2i(col, z + 4)], 3, 0, 8, true)
+	# входы — только внизу
+	L.set_edge(x + 2, z + h - 1, 1, LD.E_ARCH)
+	L.set_edge(x + w - 3, z + h - 1, 1, LD.E_ARCH)
+	L.set_edge(x + w / 2, z + h - 1, 1, LD.E_OPEN)
+	L.set_edge(x + w - 1, z + 7 + L.rng.randi_range(0, h - 9), 0, LD.E_DOOR)
+	L.set_edge(x, z + 7 + L.rng.randi_range(0, h - 9), 2, LD.E_DOOR)
+	# перила по краю террасы
+	for i in w:
+		if x + i < s0 or x + i > s0 + 2:
+			_rail(L, x + i, z + 3, 1, L.rng.randf() < 0.12)
+	# наверху — двери в стену и одинокий стул лицом к ним
+	for k in 3:
+		var dx := x + 2 + k * ((w - 4) / 2)
+		L.add_deco({"k": "door", "kind": "wall", "p": L.wall_point(dx, z, 3, 0.0) + Vector3(0, 2.4, 0), "r": LD.dir_yaw(3)})
+	L.add_deco({"k": "obj", "what": "ochair", "p": _cf(L, x + w / 2, z + 1), "r": PI, "wrong": "none"})
+	_entry(L, x + w / 2, z + h - 2)
+
+
+## Мост над пропастью: поперёк зала провал в 15 м, через него — узкая полоса пола
+static func chasm(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_ceil_all(L, x, z, w, h, 40)
+	var bx := x + w / 2 + L.rng.randi_range(-2, 2)
+	for i in w:
+		for j in h:
+			var ci := LD.idx(x + i, z + j)
+			L.used[ci] = 2
+			var gap := j >= 2 and j < h - 2
+			if gap and x + i != bx:
+				L.fh[ci] = -150
+				L.light[ci] = LD.L_NONE
+			elif gap:
+				L.light[ci] = LD.L_FLICK if j % 2 == 0 else LD.L_NONE
+			else:
+				L.light[ci] = LD.L_ON if (i + j) % 2 == 0 else LD.L_NONE
+	L.set_edge(x + w / 2, z, 3, LD.E_ARCH)
+	L.set_edge(x, z + 1, 2, LD.E_OPEN)
+	L.set_edge(x + w / 2 - 1, z + h - 1, 1, LD.E_ARCH)
+	L.set_edge(x + w - 1, z + h - 2, 0, LD.E_DOOR)
+	L.add_deco({"k": "tile_fallen", "p": _cf(L, bx - 1, z + 1) + Vector3(0.3, 0, 0.5), "r": 0.4})
+	_graf(L, x + 1, z, 3, "graf.dont_look", 1.5)
+	_entry(L, bx, z, 0.0, 0.6)
+
+
+## Лестница вниз: узкий бетонный пролёт на 6 м вниз, внизу — тупик и находка
+static func stairwell(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_ceil_all(L, x, z, w, h, LD.CEIL)
+	var along_z := h > w
+	var d := 1 if along_z else 0
+	var n := maxi(w, h)
+	for side in 2:
+		var cl := []
+		for k in range(1, 7):
+			cl.append(Vector2i(x + (side if along_z else k), z + (k if along_z else side)))
+		_slope(L, cl, d, 0, -10, true)
+		for k in range(7, n):
+			L.fh[LD.idx(x + (side if along_z else k), z + (k if along_z else side))] = -60
+	for k in n:
+		for side in 2:
+			var ci := LD.idx(x + (side if along_z else k), z + (k if along_z else side))
+			L.used[ci] = 2
+			L.light[ci] = LD.L_NONE
+	var lc := func(k: int) -> int: return LD.idx(x + (0 if along_z else k), z + (k if along_z else 0))
+	L.light[lc.call(0)] = LD.L_ON
+	L.light[lc.call(3)] = LD.L_FLICK
+	L.light[lc.call(n - 1)] = LD.L_BULB
+	# вход только сверху
+	if along_z:
+		L.set_edge(x, z, 3, LD.E_ARCH)
+		L.set_edge(x + 1, z, 3, LD.E_ARCH)
+	else:
+		L.set_edge(x, z, 2, LD.E_ARCH)
+		L.set_edge(x, z + 1, 2, LD.E_ARCH)
+	var bot := Vector2i(x + (1 if along_z else n - 1), z + (n - 1 if along_z else 1))
+	if L.rng.randf() < 0.5:
+		L.add_deco({"k": "hazmat", "p": _cf(L, bot.x, bot.y), "r": LD.dir_yaw(d), "pose": "slump", "seed": L.rng.randi()})
+	else:
+		L.add_deco({"k": "obj", "what": "chair", "p": _cf(L, bot.x, bot.y), "r": LD.dir_yaw(d) + PI, "wrong": "none"})
+		_graf(L, bot.x, bot.y, d, "graf.down", 1.3 - 6.0)
+	_entry(L, x + (1 if along_z else 0), z + (0 if along_z else 1))
+
+
+## Пандус: бетонный съезд вниз на 3 м, низина (иногда в воде) и подъём обратно — как пустая парковка
+static func ramp_room(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_ceil_all(L, x, z, w, h, LD.CEIL)
+	var along_z := h > w
+	var d := 1 if along_z else 0
+	var n := maxi(w, h)
+	var wet := L.rng.randf() < 0.6
+	for side in 2:
+		var cell := func(k: int) -> Vector2i: return Vector2i(x + (side if along_z else k), z + (k if along_z else side))
+		_slope(L, [cell.call(2), cell.call(3), cell.call(4)], d, 0, -10, false)
+		for k in [5, 6]:
+			var c2: Vector2i = cell.call(k)
+			L.fh[LD.idx(c2.x, c2.y)] = -30
+			if wet:
+				L.water[LD.idx(c2.x, c2.y)] = 1
+		_slope(L, [cell.call(7), cell.call(8), cell.call(9)], d, -30, 10, false)
+		for k in n:
+			var c3: Vector2i = cell.call(k)
+			var ci := LD.idx(c3.x, c3.y)
+			L.used[ci] = 2
+			L.light[ci] = LD.L_NONE
+	var lc := func(k: int) -> int: return LD.idx(x + (0 if along_z else k), z + (k if along_z else 0))
+	L.light[lc.call(0)] = LD.L_ON
+	L.light[lc.call(3)] = LD.L_FLICK
+	L.light[lc.call(6)] = LD.L_ON
+	L.light[lc.call(n - 1)] = LD.L_ON
+	if along_z:
+		L.set_edge(x, z, 3, LD.E_OPEN)
+		L.set_edge(x + 1, z, 3, LD.E_OPEN)
+		L.set_edge(x, z + n - 1, 1, LD.E_OPEN)
+		L.set_edge(x + 1, z + n - 1, 1, LD.E_OPEN)
+	else:
+		L.set_edge(x, z, 2, LD.E_OPEN)
+		L.set_edge(x, z + 1, 2, LD.E_OPEN)
+		L.set_edge(x + n - 1, z, 0, LD.E_OPEN)
+		L.set_edge(x + n - 1, z + 1, 0, LD.E_OPEN)
+	if wet:
+		L.add_deco({"k": "drips", "p": _cf(L, x + (0 if along_z else 5), z + (5 if along_z else 0)), "r": 0.0})
+	_entry(L, x + (1 if along_z else 0), z + (0 if along_z else 1))
+
+
+## Комната с дырами: в полу провалы — неглубокие и такие, у которых не видно дна
+static func holes(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_open(L, x, z, w, h, 4, LD.E_ARCH)
+	_lights(L, x, z, w, h, LD.L_ON)
+	var made := 0
+	for t in 40:
+		if made >= 6:
+			break
+		var i := L.rng.randi_range(1, w - 2)
+		var j := L.rng.randi_range(1, h - 2)
+		var ci := LD.idx(x + i, z + j)
+		if L.fh[ci] != 0:
+			continue
+		var r := L.rng.randf()
+		# по колено (вылезти можно) или без дна; средних, из которых не выбраться, нет
+		L.fh[ci] = (-10 - L.rng.randi_range(0, 2) * 2) if r < 0.5 else -140
+		L.light[ci] = LD.L_NONE
+		if L.rng.randf() < 0.5:
+			L.add_deco({"k": "tile_fallen", "p": _cf(L, x + i, z + j) + Vector3(0, 0.0, 0), "r": L.rng.randf() * TAU})
+		made += 1
+	_graf(L, x, z + h / 2, 2, "graf.mind_gap", 1.4)
+	_entry(L, x + w / 2, z + 0)
+
+
+## Зал с балконами: кольцо на высоте 3,2 м вокруг пустого двусветного зала; вход снизу, на балконы — лестница
+static func atrium(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	_ceil_all(L, x, z, w, h, 72)
+	var px0 := x + w / 2 - 1
+	for i in w:
+		for j in h:
+			var ci := LD.idx(x + i, z + j)
+			var ring := i < 2 or i >= w - 2 or j < 2 or j >= h - 2
+			var passage := j >= h - 2 and (x + i == px0 or x + i == px0 + 1)
+			if ring and not passage:
+				L.fh[ci] = 32
+			L.used[ci] = 2
+			L.light[ci] = LD.L_ON if (i + j) % 2 == 0 else (LD.L_DEAD if (i * 3 + j) % 7 == 0 else LD.L_NONE)
+	var stx := x + w / 2 + 2
+	_slope(L, [Vector2i(stx, z + 5), Vector2i(stx, z + 4), Vector2i(stx, z + 3), Vector2i(stx, z + 2)], 3, 0, 8, true)
+	L.set_edge(px0, z + h - 1, 1, LD.E_ARCH)
+	L.set_edge(px0 + 1, z + h - 1, 1, LD.E_ARCH)
+	# перила по внутреннему краю балконов
+	for i in w:
+		for j in h:
+			var ci := LD.idx(x + i, z + j)
+			if L.fh[ci] != 32 or L.ramp[ci] != 0:
+				continue
+			for dd in 4:
+				var o: Vector2i = LD.DIRS[dd]
+				var nj := LD.idx(x + i + o.x, z + j + o.y)
+				var inside := i + o.x >= 0 and i + o.x < w and j + o.y >= 0 and j + o.y < h
+				if inside and L.fh[nj] == 0 and L.ramp[nj] == 0 and L.flo[nj] == LD.F_FLOOR:
+					_rail(L, x + i, z + j, dd, L.rng.randf() < 0.1)
+	for k in 4:
+		var side: int = [0, 2, 3, 3][k]
+		var cx2 := x + (w - 1 if side == 0 else (0 if side == 2 else 3 + k * 2))
+		var cz2 := z + (h / 2 if side != 3 else 0)
+		L.add_deco({"k": "door", "kind": "wall", "p": L.wall_point(cx2, cz2, side, 0.0) + Vector3(0, 3.2, 0), "r": LD.dir_yaw(side)})
+	L.add_deco({"k": "obj", "what": "chair", "p": _cf(L, x + w / 2, z + h / 2), "r": L.rng.randf() * TAU, "wrong": "none"})
+	_entry(L, px0, z + h - 1)
+
+
+## Высокий зал: 20×16 клеток, потолок 7 м, редкие колонны и редкий свет — пусто и гулко
+static func tall_hall(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_YELLOW, 0)
+	for k in 6:
+		L._open_border(x, z, w, h, k % 4, LD.E_OPEN)
+	_ceil_all(L, x, z, w, h, 70)
+	for i in range(3, w - 2, 3):
+		for j in range(3, h - 2, 3):
+			L.post[LD.idx(x + i, z + j)] = 1
+	for i in w:
+		for j in h:
+			var ci := LD.idx(x + i, z + j)
+			L.used[ci] = 2
+			L.light[ci] = LD.L_ON if (i % 3 == 1 and j % 3 == 1) else (LD.L_DEAD if (i + j * 2) % 9 == 0 else LD.L_NONE)
+	if L.rng.randf() < 0.5:
+		L.add_deco({"k": "vending", "p": _cf(L, x + w - 2, z + h / 2) + Vector3(0.6, 0, 0), "r": LD.dir_yaw(2)})
+	else:
+		L.add_deco({"k": "obj", "what": "ochair", "p": _cf(L, x + w / 2, z + h / 2), "r": L.rng.randf() * TAU, "wrong": "none"})
+
+
+## Колодец: в середине тёмного зала квадратная дыра без дна, перила местами сломаны
+static func well(L: LayerData, x: int, z: int, w: int, h: int) -> void:
+	L.stamp_room(x, z, w, h, LD.Z_DARK, 0)
+	_open(L, x, z, w, h, 4, LD.E_ARCH)
+	_ceil_all(L, x, z, w, h, 50)
+	var c0 := Vector2i(x + w / 2 - 2, z + h / 2 - 2)
+	for i in w:
+		for j in h:
+			var ci := LD.idx(x + i, z + j)
+			L.used[ci] = 2
+			var inw := x + i >= c0.x and x + i < c0.x + 4 and z + j >= c0.y and z + j < c0.y + 4
+			if inw:
+				L.fh[ci] = -220
+				L.light[ci] = LD.L_NONE
+			else:
+				var ring := x + i >= c0.x - 1 and x + i <= c0.x + 4 and z + j >= c0.y - 1 and z + j <= c0.y + 4
+				L.light[ci] = LD.L_ON if (ring and (i + j) % 2 == 0) else (LD.L_DEAD if (i + j) % 5 == 0 else LD.L_NONE)
+	for i in range(-1, 5):
+		for j in range(-1, 5):
+			var gx := c0.x + i
+			var gz := c0.y + j
+			var ci2 := LD.idx(gx, gz)
+			if L.fh[ci2] != 0:
+				continue
+			for dd in 4:
+				var o: Vector2i = LD.DIRS[dd]
+				if L.fh[LD.idx(gx + o.x, gz + o.y)] == -220 and L.rng.randf() < 0.8:
+					_rail(L, gx, gz, dd, L.rng.randf() < 0.25)
+	_entry(L, x + w / 2, z + 1)
+
+
+## Редкие провалы пола в обычных коридорах: где-то по колено, где-то — без дна
+static func sprinkle_holes(L: LayerData, lay: int, origin: Vector2i) -> void:
+	var want := 9 if lay == 0 else 6
+	var made := 0
+	for t in 600:
+		if made >= want:
+			break
+		var a := L.rng.randf() * TAU
+		var r := L.rng.randf_range(14.0, 110.0)
+		var cx := origin.x + int(cos(a) * r)
+		var cz := origin.y + int(sin(a) * r)
+		var ci := LD.idx(cx, cz)
+		if L.flo[ci] != LD.F_FLOOR or L.used[ci] != 0 or not L.flat0(ci) or L.ceil_h[ci] < 24:
+			continue
+		var zn := L.zone[ci]
+		if zn != LD.Z_YELLOW and zn != LD.Z_DARK and zn != LD.Z_OLD and zn != LD.Z_CONCRETE:
+			continue
+		# не перегораживать узкие проходы: вокруг не больше одной стены и соседи — ровный пол
+		if L.wall_sides(cx, cz).size() > 1:
+			continue
+		var ok := true
+		for d in 4:
+			var o: Vector2i = LD.DIRS[d]
+			var nj := LD.idx(cx + o.x, cz + o.y)
+			if L.flo[nj] != LD.F_FLOOR or not L.flat0(nj) or L.used[nj] != 0:
+				ok = false
+		if not ok:
+			continue
+		var open_d := []
+		for d2 in 4:
+			if LD.edge_passable(L.edge(cx, cz, d2)):
+				open_d.append(d2)
+		if open_d.is_empty():
+			continue
+		var o2: Vector2i = LD.DIRS[open_d[L.rng.randi_range(0, open_d.size() - 1)]]
+		var deep := L.rng.randf() < 0.45
+		L.fh[ci] = (-130 - L.rng.randi_range(0, 3) * 10) if deep else (-9 - L.rng.randi_range(0, 3) * 2)
+		L.used[ci] = 1
+		L.light[ci] = LD.L_NONE
+		L.add_deco({"k": "tile_fallen", "p": _c(L, cx + o2.x, cz + o2.y), "r": L.rng.randf() * TAU})
+		L.places["hole_%d" % made] = _c(L, cx + o2.x, cz + o2.y)
+		L.places["hole_%d_c" % made] = _c(L, cx, cz)
+		made += 1
+
+
+## Находки по миру — понемногу: сотрудники Async в химзащите (чаще в тупиках), чужие вещи, камера на штативе,
+## следы волочения в стену, дверь посреди зала, брошенная ночёвка
+static func sprinkle_finds(L: LayerData, lay: int, origin: Vector2i) -> void:
+	var want := {"hazmat": 4 if lay == 0 else 3, "clothes": 3, "tripod_cam": 2, "drag": 2, "lone_door": 2, "lost_camp": 2}
+	var notes := ["note.a_hz1", "note.a_hz2", "note.a_hz3"]
+	var note_i := 0 if lay == 0 else 1
+	for kind in want.keys():
+		var made := 0
+		for t in 900:
+			if made >= int(want[kind]):
+				break
+			var a := L.rng.randf() * TAU
+			var r := L.rng.randf_range(16.0, 115.0)
+			var cx := origin.x + int(cos(a) * r)
+			var cz := origin.y + int(sin(a) * r)
+			var ci := LD.idx(cx, cz)
+			if L.flo[ci] != LD.F_FLOOR or L.used[ci] != 0 or not L.flat0(ci) or L.ceil_h[ci] < 24 or L.water[ci] != 0:
+				continue
+			var sides := L.wall_sides(cx, cz)
+			var p := _c(L, cx, cz)
+			match kind:
+				"hazmat":
+					# у стены; тупик (три стены) — лучше всего
+					if sides.is_empty() or (sides.size() < 3 and L.rng.randf() < 0.6):
+						continue
+					var sd: int = sides[0]
+					var wp := L.wall_point(cx, cz, sd, 0.35)
+					var d := {"k": "hazmat", "p": wp, "r": LD.dir_yaw(sd) + PI, "seed": L.rng.randi(), "pose": "slump" if L.rng.randf() < 0.6 else "lie"}
+					if made < 2:
+						d["note"] = true
+						d["key"] = notes[note_i % notes.size()]
+						note_i += 1
+					L.add_deco(d)
+				"clothes":
+					L.add_deco({"k": "clothes", "p": p + Vector3(L.rng.randf_range(-0.5, 0.5), 0, L.rng.randf_range(-0.5, 0.5)), "r": L.rng.randf() * TAU})
+				"tripod_cam":
+					if sides.is_empty():
+						continue
+					var sd2: int = sides[0]
+					# смотрит в стену с метра
+					L.add_deco({"k": "tripod_cam", "p": L.wall_point(cx, cz, sd2, 1.0), "r": LD.dir_yaw(sd2) + PI})
+				"drag":
+					if sides.is_empty():
+						continue
+					var sd3: int = sides[0]
+					L.add_deco({"k": "drag", "p": L.wall_point(cx, cz, sd3, 0.0), "r": LD.dir_yaw(sd3) + PI})
+				"lone_door":
+					if not sides.is_empty():
+						continue
+					L.add_deco({"k": "lone_door", "p": p, "r": L.rng.randi_range(0, 3) * PI * 0.5})
+				"lost_camp":
+					if sides.is_empty():
+						continue
+					var sd4: int = sides[0]
+					L.add_deco({"k": "lost_camp", "p": L.wall_point(cx, cz, sd4, 0.95), "r": LD.dir_yaw(sd4) + PI})
+			L.used[ci] = 1
+			L.places["find_%s_%d" % [kind, made]] = p
+			made += 1

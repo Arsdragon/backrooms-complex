@@ -46,6 +46,11 @@ var bot := false               # автотест: ввод задаёт бот
 var bot_input := Vector2.ZERO
 var bot_run := false
 var freecam: FreeCam = null    # свободная камера (G в «Приключении» и полигоне)
+var _mantle_t := 0.0           # подтягивание на уступ (идёт, пока > 0)
+var _mantle_len := 0.0
+var _mantle_from := Vector3.ZERO
+var _mantle_to := Vector3.ZERO
+var _push_t := 0.0             # сколько упирается вперёд в стену
 
 
 func _ready() -> void:
@@ -124,6 +129,19 @@ func _physics_process(dt: float) -> void:
 	rotation.y = yaw
 	head.rotation.x = pitch
 
+	# подтягивание на уступ: короткая анимация вместо обычного движения
+	if _mantle_t > 0.0:
+		_mantle_t -= dt
+		var k := clampf(1.0 - _mantle_t / _mantle_len, 0.0, 1.0)
+		var up := smoothstep(0.0, 0.6, k)
+		var fw := smoothstep(0.45, 1.0, k)
+		global_position = Vector3(lerpf(_mantle_from.x, _mantle_to.x, fw), lerpf(_mantle_from.y, _mantle_to.y + 0.05, up), lerpf(_mantle_from.z, _mantle_to.z, fw))
+		velocity = Vector3.ZERO
+		fall_speed = 0.0
+		air_time = 0.0
+		eye = move_toward(eye, EYE - 0.35 * sin(k * PI), dt * 4.0)
+		_camera_motion(dt, 0.0)
+		return
 	var want_crouch := not frozen and ((Input.is_action_pressed("crouch") and not fc) or Cfg.has_arg("crouch") or (fc and crouching))
 	if crouching and not want_crouch:
 		# встать можно, только если над головой есть место
@@ -172,6 +190,14 @@ func _physics_process(dt: float) -> void:
 		fall_speed = maxf(fall_speed, -velocity.y)
 	var was_air := not is_on_floor()
 	move_and_slide()
+	# упёрся в уступ по грудь — подтянуться
+	if is_on_floor() and is_on_wall() and inp.y < -0.5 and not frozen and freecam == null:
+		_push_t += dt
+		if _push_t > 0.22:
+			_push_t = 0.0
+			_try_mantle()
+	else:
+		_push_t = 0.0
 	if is_on_floor():
 		if was_air and air_time > 0.25:
 			landed.emit(fall_speed)
@@ -208,6 +234,45 @@ func _physics_process(dt: float) -> void:
 	_camera_motion(dt, hv)
 	_breathing(dt)
 	_interact_scan()
+
+
+## Есть ли впереди уступ высотой 0,45–1,6 м с местом для героя сверху
+func _try_mantle() -> void:
+	var fwd := -transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var space := get_world_3d().direct_space_state
+	var top := global_position + Vector3(0, 1.8, 0) + fwd * 0.62
+	var q := PhysicsRayQueryParameters3D.create(top, top - Vector3(0, 1.45, 0), 1)
+	q.exclude = [get_rid()]
+	var hit := space.intersect_ray(q)
+	if hit.is_empty():
+		return
+	var hp: Vector3 = hit.position
+	var hn: Vector3 = hit.normal
+	var hy := hp.y - global_position.y
+	if hy < 0.45 or hy > 1.62 or hn.y < 0.8:
+		return
+	# уступ не узкий (не перила): пол есть и чуть дальше
+	var q2 := PhysicsRayQueryParameters3D.create(top + fwd * 0.3, top + fwd * 0.3 - Vector3(0, 1.45, 0), 1)
+	q2.exclude = [get_rid()]
+	var hit2 := space.intersect_ray(q2)
+	if hit2.is_empty() or absf((hit2.position as Vector3).y - hp.y) > 0.15:
+		return
+	# над краем и над головой свободно
+	for probe in [global_position + Vector3(0, 0.3, 0), hp + fwd * 0.15 + Vector3(0, 0.05, 0)]:
+		var pv: Vector3 = probe
+		var qu := PhysicsRayQueryParameters3D.create(pv, pv + Vector3(0, hy + 1.75 if pv.y < hp.y else 1.75, 0), 1)
+		qu.exclude = [get_rid()]
+		if not space.intersect_ray(qu).is_empty():
+			return
+	_mantle_from = global_position
+	_mantle_to = hp + fwd * 0.2
+	_mantle_len = 0.5 + hy * 0.35
+	_mantle_t = _mantle_len
+	Snd.play("cloth", -8.0, randf_range(0.9, 1.1))
+	if hy > 1.0:
+		Snd.play("grunt", -12.0, randf_range(0.95, 1.1))
 
 
 func _footstep() -> void:

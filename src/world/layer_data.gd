@@ -45,6 +45,10 @@ const L_BULB := 7
 const L_GREEN := 8
 
 const DIRS := [Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(0, -1)]
+const CEIL := 32                      # обычная высота потолка, дм
+const R_SIDE := -99999                # «бок пандуса» — по нему не сойти
+const STEP_MAX := 4                   # перепад (дм), который считается ровным полом
+const DEADLY_DROP := 70               # глубина (дм), падение с которой смертельно
 
 var layer := 0
 var seed := 0
@@ -59,6 +63,8 @@ var post := PackedByteArray()       # 1 — колонна в СЗ-углу кл
 var cable := PackedByteArray()      # биты направлений кабеля
 var water := PackedByteArray()      # 1 — пол залит водой
 var used := PackedByteArray()       # 1 — особая комната; 2 — особая и свет расставлен вручную
+var fh := PackedInt32Array()        # высота пола клетки, дм от floor_y (< 0 — провал/дыра, > 0 — терраса)
+var ramp := PackedByteArray()       # 0 — ровно; 1..4 — пандус к стороне d+1; 5..8 — лестница к стороне d-3
 var cable_par := PackedInt32Array() # для меток: куда вести к станции (индекс направления+1)
 var cable_dist := PackedInt32Array()
 var reach := PackedByteArray()
@@ -111,11 +117,86 @@ func can_step(x: int, z: int, d: int) -> bool:
 	if not edge_passable(edge(x, z, d)):
 		return false
 	var o: Vector2i = DIRS[d]
-	return flo[idx(x + o.x, z + o.y)] == F_FLOOR
+	return flo[idx(x + o.x, z + o.y)] == F_FLOOR and step_ok(x, z, d)
 
 
 func height_m(x: int, z: int) -> float:
 	return ceil_h[idx(x, z)] * 0.1
+
+
+# ---------------------------------------------------------------- высота пола
+
+## Сторона, к которой идёт пандус/лестница клетки (−1 — ровный пол)
+func ramp_dir(i: int) -> int:
+	return (ramp[i] - 1) % 4 if ramp[i] > 0 else -1
+
+
+func is_stairs(i: int) -> bool:
+	return ramp[i] >= 5
+
+
+## Высота пола (м от floor_y) в точке (px, pz), считая внутри клетки (x, z) — и на её границе
+func floor_off_cell(x: int, z: int, px: float, pz: float) -> float:
+	var i := idx(x, z)
+	var r := ramp[i]
+	if r == 0:
+		return fh[i] * 0.1
+	var rd := (r - 1) % 4
+	var lx := clampf((px - x * C) / C, 0.0, 1.0)
+	var lz := clampf((pz - z * C) / C, 0.0, 1.0)
+	var t := lx
+	if rd == 1:
+		t = lz
+	elif rd == 2:
+		t = 1.0 - lx
+	elif rd == 3:
+		t = 1.0 - lz
+	var o: Vector2i = DIRS[rd]
+	return lerpf(float(fh[i]), float(fh[idx(x + o.x, z + o.y)]), t) * 0.1
+
+
+## Высота пола (м от floor_y) в точке мира
+func floor_off(px: float, pz: float) -> float:
+	return floor_off_cell(int(floor(px / C)), int(floor(pz / C)), px, pz)
+
+
+## Абсолютная высота пола под точкой
+func ground(p: Vector3) -> float:
+	return floor_y + floor_off(p.x, p.z)
+
+
+## Высота пола клетки у ребра d (дм); у боковых рёбер пандуса — R_SIDE
+func edge_floor(x: int, z: int, d: int) -> int:
+	var i := idx(x, z)
+	var r := ramp[i]
+	if r == 0:
+		return fh[i]
+	var rd := (r - 1) % 4
+	if d == rd:
+		var o: Vector2i = DIRS[rd]
+		return fh[idx(x + o.x, z + o.y)]
+	if d == (rd + 2) % 4:
+		return fh[i]
+	return R_SIDE
+
+
+## Можно ли перейти из клетки в соседнюю по высоте: не обрыв и не бок пандуса
+func step_ok(x: int, z: int, d: int) -> bool:
+	var i := idx(x, z)
+	var o: Vector2i = DIRS[d]
+	var j := idx(x + o.x, z + o.y)
+	if ramp[i] == 0 and ramp[j] == 0:
+		return absi(fh[i] - fh[j]) <= STEP_MAX
+	var a := edge_floor(x, z, d)
+	var b := edge_floor(x + o.x, z + o.y, (d + 2) % 4)
+	if a == R_SIDE or b == R_SIDE:
+		return ramp[i] == ramp[j] and fh[i] == fh[j]
+	return absi(a - b) <= STEP_MAX
+
+
+## Пол клетки ровный и на уровне слоя
+func flat0(i: int) -> bool:
+	return fh[i] == 0 and ramp[i] == 0
 
 
 func add_deco(d: Dictionary) -> void:
@@ -162,6 +243,10 @@ func init_arrays() -> void:
 	water.fill(0)
 	used.resize(nn)
 	used.fill(0)
+	fh.resize(nn)
+	fh.fill(0)
+	ramp.resize(nn)
+	ramp.fill(0)
 	reach.resize(nn)
 	cable_par.resize(nn)
 	cable_dist.resize(nn)
@@ -170,7 +255,7 @@ func init_arrays() -> void:
 	flo.fill(F_FLOOR)
 	zone.fill(Z_YELLOW)
 	light.fill(L_NONE)
-	ceil_h.fill(27)
+	ceil_h.fill(CEIL)
 	post.fill(0)
 	cable.fill(0)
 	reach.fill(0)
@@ -362,20 +447,21 @@ func place_lights(dark_bias: float) -> void:
 				Z_YELLOW, Z_PITS, Z_STRETCH:
 					if (x + z) % 2 != 0:
 						continue
-					if r < 0.86 - dark_bias:
+					if r < 0.92 - dark_bias:
 						light[i] = L_ON
-					elif r < 0.91 - dark_bias * 0.5:
+					elif r < 0.955 - dark_bias * 0.5:
 						light[i] = L_FLICK
 					elif r < 0.985:
 						light[i] = L_DEAD
 					else:
 						light[i] = L_HOLE
 				Z_DARK:
+					# сырые места темнее обычных, но не тёмные провалы
 					if (x + z) % 2 != 0:
 						continue
-					if r < 0.06:
+					if r < 0.45:
 						light[i] = L_ON
-					elif r < 0.17:
+					elif r < 0.62:
 						light[i] = L_FLICK
 					elif r < 0.95:
 						light[i] = L_DEAD
@@ -409,7 +495,7 @@ func fix_connectivity(sx: int, sz: int) -> void:
 				for d in 4:
 					var o: Vector2i = DIRS[d]
 					var j := idx(x + o.x, z + o.y)
-					if reach[j] and flo[j] == F_FLOOR and edge(x, z, d) != E_WINDOW and zone[i] != Z_HOUSE:
+					if reach[j] and flo[j] == F_FLOOR and edge(x, z, d) != E_WINDOW and zone[i] != Z_HOUSE and step_ok(x, z, d):
 						if not edge_passable(edge(x, z, d)):
 							set_edge(x, z, d, E_ARCH)
 						reach[i] = 1
@@ -417,6 +503,21 @@ func fix_connectivity(sx: int, sz: int) -> void:
 						q2.append(i)
 						_bfs_expand(q2)
 						break
+
+
+## Проходимость по высоте для быстрых обходов (по индексам соседних клеток)
+func _lvl(i: int, j: int, x: int, z: int) -> bool:
+	if fh[i] == fh[j] and ramp[i] == 0 and ramp[j] == 0:
+		return true
+	var n := N
+	var jx := j % n
+	var jz := j / n
+	var d := 0
+	if jz == z:
+		d = 0 if (jx == x + 1 or (x == n - 1 and jx == 0)) else 2
+	else:
+		d = 1 if (jz == z + 1 or (z == n - 1 and jz == 0)) else 3
+	return step_ok(x, z, d)
 
 
 func _bfs_expand(q: PackedInt32Array) -> void:
@@ -431,22 +532,22 @@ func _bfs_expand(q: PackedInt32Array) -> void:
 		var z := i / n
 		var j := i + 1 if x < last else i - last
 		var v := wall_e[i]
-		if v != E_WALL and v != E_WINDOW and reach[j] == 0 and flo[j] == F_FLOOR:
+		if v != E_WALL and v != E_WINDOW and reach[j] == 0 and flo[j] == F_FLOOR and _lvl(i, j, x, z):
 			reach[j] = 1
 			q.append(j)
 		j = i - 1 if x > 0 else i + last
 		v = wall_e[j]
-		if v != E_WALL and v != E_WINDOW and reach[j] == 0 and flo[j] == F_FLOOR:
+		if v != E_WALL and v != E_WINDOW and reach[j] == 0 and flo[j] == F_FLOOR and _lvl(i, j, x, z):
 			reach[j] = 1
 			q.append(j)
 		j = i + n if z < last else x
 		v = wall_s[i]
-		if v != E_WALL and v != E_WINDOW and reach[j] == 0 and flo[j] == F_FLOOR:
+		if v != E_WALL and v != E_WINDOW and reach[j] == 0 and flo[j] == F_FLOOR and _lvl(i, j, x, z):
 			reach[j] = 1
 			q.append(j)
 		j = i - n if z > 0 else i + n * last
 		v = wall_s[j]
-		if v != E_WALL and v != E_WINDOW and reach[j] == 0 and flo[j] == F_FLOOR:
+		if v != E_WALL and v != E_WINDOW and reach[j] == 0 and flo[j] == F_FLOOR and _lvl(i, j, x, z):
 			reach[j] = 1
 			q.append(j)
 
@@ -478,25 +579,25 @@ func bfs_from(sx: int, sz: int, max_d := 100000) -> Array:
 		# восток (обратно — на запад = 2)
 		var j := i + 1 if x < last else i - last
 		var v := wall_e[i]
-		if v != E_WALL and v != E_WINDOW and dist[j] < 0 and flo[j] == F_FLOOR:
+		if v != E_WALL and v != E_WINDOW and dist[j] < 0 and flo[j] == F_FLOOR and flat0(j):
 			dist[j] = nd
 			par[j] = 2
 			q.append(j)
 		j = i - 1 if x > 0 else i + last
 		v = wall_e[j]
-		if v != E_WALL and v != E_WINDOW and dist[j] < 0 and flo[j] == F_FLOOR:
+		if v != E_WALL and v != E_WINDOW and dist[j] < 0 and flo[j] == F_FLOOR and flat0(j):
 			dist[j] = nd
 			par[j] = 0
 			q.append(j)
 		j = i + n if z < last else x
 		v = wall_s[i]
-		if v != E_WALL and v != E_WINDOW and dist[j] < 0 and flo[j] == F_FLOOR:
+		if v != E_WALL and v != E_WINDOW and dist[j] < 0 and flo[j] == F_FLOOR and flat0(j):
 			dist[j] = nd
 			par[j] = 3
 			q.append(j)
 		j = i - n if z > 0 else i + n * last
 		v = wall_s[j]
-		if v != E_WALL and v != E_WINDOW and dist[j] < 0 and flo[j] == F_FLOOR:
+		if v != E_WALL and v != E_WINDOW and dist[j] < 0 and flo[j] == F_FLOOR and flat0(j):
 			dist[j] = nd
 			par[j] = 1
 			q.append(j)
@@ -543,7 +644,7 @@ func find_cell_near(tx: int, tz: int, radius: int, cond: Callable) -> Vector2i:
 
 func is_plain(x: int, z: int) -> bool:
 	var i := idx(x, z)
-	return flo[i] == F_FLOOR and ceil_h[i] >= 24 and (zone[i] == Z_YELLOW or zone[i] == Z_DARK or zone[i] == Z_OLD or zone[i] == Z_CONCRETE or zone[i] == Z_TILE)
+	return flo[i] == F_FLOOR and ceil_h[i] >= 24 and flat0(i) and (zone[i] == Z_YELLOW or zone[i] == Z_DARK or zone[i] == Z_OLD or zone[i] == Z_CONCRETE or zone[i] == Z_TILE)
 
 
 ## Свободна ли прямоугольная область под штамп (нет уже поставленных особых комнат)
@@ -554,7 +655,7 @@ func area_free(x0: int, z0: int, w: int, h: int) -> bool:
 			if zi == Z_ASYNC or zi == Z_HOUSE or zi == Z_STRETCH or zi == Z_SKY or zi == Z_PITS or zi == Z_CELLAR \
 					or zi == Z_FLIP or zi == Z_STORE or zi == Z_CLASS:
 				return false
-			if ceil_h[idx(x0 + i, z0 + j)] != 27 and ceil_h[idx(x0 + i, z0 + j)] != 25 and ceil_h[idx(x0 + i, z0 + j)] != 28:
+			if ceil_h[idx(x0 + i, z0 + j)] != CEIL:
 				return false
 			if flo[idx(x0 + i, z0 + j)] == F_SOLID or used[idx(x0 + i, z0 + j)] != 0:
 				return false

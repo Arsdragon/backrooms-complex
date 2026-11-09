@@ -9,6 +9,8 @@ uniform float tracking = 0.0;       // срыв трекинга (вспышка
 uniform float stopfx = 0.0;         // «стоп/перемотка»: 0..1
 uniform float desat = 0.0;          // доп. обесцвечивание
 uniform float bw = 0.0;             // 1 — чёрно-белая камера наблюдения
+uniform float hurt = 0.0;           // ранение 0..1: кадр краснеет от краёв к центру (полоски здоровья нет)
+uniform float hurt_flash = 0.0;     // вспышка в момент удара
 uniform vec2 src_size = vec2(640.0, 480.0);
 uniform float time_offset = 0.0;
 
@@ -116,6 +118,19 @@ void fragment() {
 	// камера наблюдения
 	float lum = dot(col, vec3(0.299, 0.587, 0.114));
 	col = mix(col, vec3(lum) * vec3(0.92, 1.0, 0.95), bw);
+	// ранение: красное наползает с краёв, сердце стучит, при смерти — весь кадр красный
+	if (hurt > 0.001 || hurt_flash > 0.001) {
+		float hr = clamp(hurt, 0.0, 1.0);
+		float beat = pow(max(sin(TIME * (5.0 + hr * 3.0)), 0.0), 6.0) * hr;
+		float r = length(vc * vec2(1.25, 1.0)) * 1.55;
+		float reach = mix(1.25, 0.05, hr) - beat * 0.12;
+		float edge = smoothstep(reach - 0.35, reach + 0.25, r);
+		float lr = dot(col, vec3(0.299, 0.587, 0.114));
+		vec3 bled = vec3(0.07 + lr * 1.15, lr * 0.10, lr * 0.08);
+		float amt = clamp(edge * (0.55 + 0.45 * hr) + hr * hr * 0.35 + hurt_flash * 0.55, 0.0, 1.0);
+		col = mix(col, bled, amt);
+		col *= 1.0 - edge * 0.35 * hr;
+	}
 
 	// --- «стоп»: синий экран и полосы ---
 	if (stopfx > 0.0) {

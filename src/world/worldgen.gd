@@ -6,7 +6,7 @@ extends RefCounted
 const LD := preload("res://src/world/layer_data.gd")
 const Rooms := preload("res://src/world/worldgen_rooms.gd")
 
-const GRAF_COUNT := 36
+const GRAF_COUNT := 46
 const NOTES_L0 := ["note.n01", "note.n02", "note.n03", "note.n04", "note.n05", "note.n06", "note.n07", "note.n08"]
 const NOTES_L1 := ["note.u01", "note.u02", "note.u03", "note.u04", "note.u05"]
 # кто из парка «скопирован» и как именно криво
@@ -64,8 +64,6 @@ static func layer0(seed: int) -> LayerData:
 			var i := z * LD.N + x
 			if n < -0.4:
 				L.zone[i] = LD.Z_DARK
-			elif n > 0.45:
-				L.zone[i] = LD.Z_OLD
 	L.divide(0, 0, LD.N, LD.N, 0.25)
 	_prof("L.divide(0, 0, LD.N, LD.N, 0.25)")
 	L.open_random_walls(0.05)
@@ -147,6 +145,9 @@ static func layer0(seed: int) -> LayerData:
 
 static func _outpost(L: LayerData, x: int, z: int) -> void:
 	L.stamp_room(x, z, 9, 8, LD.Z_ASYNC, 0)
+	for i in 9:
+		for j in 8:
+			L.ceil_h[LD.idx(x + i, z + j)] = 27
 	for side in [0, 1, 2]:
 		L._open_border(x, z, 9, 8, side, LD.E_ARCH)
 	L._open_border(x, z, 9, 8, 1, LD.E_OPEN)
@@ -539,12 +540,9 @@ static func layer1(seed: int, l0: LayerData) -> LayerData:
 		for x in LD.N:
 			var n := nz.get_noise_2d(x, z)
 			var i := z * LD.N + x
-			if n < -0.18:
-				L.zone[i] = LD.Z_CONCRETE
-				L.ceil_h[i] = 25
-			elif n > 0.42:
-				L.zone[i] = LD.Z_TILE
-				L.ceil_h[i] = 28
+			# нижний слой: те же жёлтые обои, местами сырые и темнее
+			if n > 0.25:
+				L.zone[i] = LD.Z_YELLOW
 			else:
 				L.zone[i] = LD.Z_DARK
 	L.divide(0, 0, LD.N, LD.N, 0.18)
@@ -584,7 +582,7 @@ static func layer1(seed: int, l0: LayerData) -> LayerData:
 					L.wall_s[LD.idx(xx, zz)] = LD.E_OPEN if absi(dx) < 4 else L.wall_s[LD.idx(xx, zz)]
 				L.zone[LD.idx(xx, zz)] = LD.Z_DARK
 				if L.ceil_h[LD.idx(xx, zz)] != 0:
-					L.ceil_h[LD.idx(xx, zz)] = 27
+					L.ceil_h[LD.idx(xx, zz)] = LD.CEIL
 	# лестницы Async под лебёдками
 	for k in 2:
 		var key := "winch_%d" % k

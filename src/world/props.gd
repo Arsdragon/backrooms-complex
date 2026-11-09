@@ -235,6 +235,8 @@ static func spawn(cx: Node3D, d: Dictionary, layer: int) -> Node3D:
 	var k := String(d.get("k", ""))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(d.get("seed", hash(d.p)))
+	if not d.has("ceil"):
+		d["ceil"] = float(cx.ceil_at(d.p)) if cx != null and cx.has_method("ceil_at") else 2.7
 	match k:
 		"obj": return obj(String(d.get("what", "chair")), String(d.get("wrong", "none")), rng, d)
 		"copy": return copy_person(cx, d, rng, layer)
@@ -339,7 +341,7 @@ static func obj(what: String, wrong: String, rng: RandomNumberGenerator, d: Dict
 		"ceiling":
 			if what != "swing" and what != "balloon":
 				inner.rotation.x = PI
-				inner.position.y = 2.7 + (0.15 if what == "lamp" else 0.0)
+				inner.position.y = float(d.get("ceil", 2.7)) + (0.15 if what == "lamp" else 0.0)
 				if what == "lamp":
 					inner.position.y = 4.2
 		"stack":
@@ -652,6 +654,9 @@ static func copy_person(cx: Node3D, d: Dictionary, rng: RandomNumberGenerator, l
 	else:
 		h.pose(ps)
 	h.apply_wrong(wrong, rng)
+	if wrong == "ceiling":
+		# головой в потолок — на настоящей высоте потолка этой клетки
+		h.position.y += float(d.get("ceil", 2.7)) - 2.7
 	h.uncanny(rng)
 	if bool(d.get("mold", false)):
 		h.tune({"mold": 0.55})
@@ -777,6 +782,17 @@ static func label(text: String, font: Font, px: float, ink: Color, outline := 0)
 static func graffiti(d: Dictionary) -> Node3D:
 	var n := Node3D.new()
 	var key := String(d.get("key", "graf.g05"))
+	# надпись «от руки»: заранее нарисованная текстура (tools/tex/make_graffiti.py) плоской наклейкой на стене
+	var stem := "arrow" if key == "graf.arrow" else key.split(".", true, 1)[1]
+	var tname := "graf_%s_%s" % [stem, "en" if Loc.is_en(key) else "ru"]
+	if ResourceLoader.exists("res://tex/%s.png" % tname):
+		var tx := Mats.tex(tname)
+		var k := 0.0021 if key != "graf.arrow" else 0.0024
+		var mat := decal_mat(tname, {"tex": tname, "tex_color": 1.0, "tint": Color(1, 1, 1, 0.94)})
+		var q := quad(n, Vector2(tx.get_width(), tx.get_height()) * k, Vector3(float(d.get("along", 0.0)), 0, 0.012), mat)
+		q.rotation.z = (float(absi(hash(d.p)) % 100) / 100.0 - 0.5) * 0.08 + (PI if bool(d.get("flip", false)) else 0.0)
+		q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		return n
 	var txt := ""
 	if key == "graf.arrow":
 		txt = "<---" if bool(d.get("flip", false)) else "--->"

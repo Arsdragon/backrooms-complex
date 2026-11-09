@@ -33,6 +33,14 @@ var near_null := 99.0
 var cam_light := Vector4(0, -1000, 0, 0)
 var ended := false
 var spawn_hook: Callable
+var hurt := 0.0                 # ранение 0..1; 1 — смерть
+var _hurt_cd := 0.0             # пауза перед тем, как раны «отпускают»
+var _no_fall_t := 0.0           # падение в яму на нижний слой и приземление из парка не ранят
+var power := 1.0                # питание ламп (g_power): просадки и редкие отключения
+var _power_t := 0.0             # до следующего события с питанием
+var _power_ev := ""             # "", "dip", "out", "back"
+var _power_left := 0.0
+var _power_age := 0.0
 
 
 func _ready() -> void:
@@ -59,7 +67,7 @@ func _ready() -> void:
 	env.environment = e
 	add_child(env)
 	for i in 8:
-		_flick_state.append({"t": randf_range(1.0, 10.0), "burst": 0.0, "off": 0.0})
+		_flick_state.append({"t": randf_range(1.0, 10.0), "burst": 0.0, "off": 0.0, "sw": 0.0, "on": true})
 
 
 func setup(layer_list: Array, start_layer: int, start_pos: Vector3, start_yaw: float, is_demo := false) -> void:
@@ -87,6 +95,8 @@ func setup(layer_list: Array, start_layer: int, start_pos: Vector3, start_yaw: f
 		player.set_look(start_yaw, 0.0)
 		player.surface_fn = surface_at
 		player.noise_fn = make_noise
+		player.landed.connect(_on_landed)
+		_no_fall_t = 4.0
 	_sync_load(_focus_pos())
 
 
@@ -209,7 +219,8 @@ func _make_chunk(key: Vector3i, res: Dictionary) -> void:
 		var bb: Array = b
 		var sh := PhysicsServer3D.box_shape_create()
 		PhysicsServer3D.shape_set_data(sh, bb[1])
-		PhysicsServer3D.body_add_shape(body, sh, Transform3D(Basis(), bb[0]))
+		var bas: Basis = bb[2] if bb.size() > 2 else Basis()
+		PhysicsServer3D.body_add_shape(body, sh, Transform3D(bas, bb[0]))
 		shapes.append(sh)
 	chunks[key] = {"node": n, "body": body, "shapes": shapes, "cell_light": res.cell_light}
 	Props.spawn_all(self, n, res.deco, key.z)
@@ -253,6 +264,16 @@ func change_layer(new_layer: int, keep_pos: Vector3) -> void:
 
 
 # ------------------------------------------------------------ запросы к миру
+
+## Высота потолка над полом в точке (м)
+func ceil_at(p: Vector3) -> float:
+	var L := layer()
+	var c := cell_of(p)
+	var h := L.height_m(c.x, c.y)
+	if h <= 0.01:
+		return 2.7
+	return h - L.fh[LD.idx(c.x, c.y)] * 0.1
+
 
 ## Свет в точке: Color(ровный, мигающий, красный, группа) — для предметов и монстров
 func light_at(p: Vector3) -> Color:
@@ -378,6 +399,9 @@ func make_noise(p: Vector3, radius: float) -> void:
 
 func _process(dt: float) -> void:
 	t += dt
+	if not demo:
+		_hurt_tick(dt)
+		_update_power(dt)
 	var fp := _focus_pos()
 	_stream(fp)
 	_update_flicker(dt)
@@ -410,19 +434,20 @@ func _process(dt: float) -> void:
 	fwd = fwd.normalized()
 	for k in 4:
 		b += brightness_at(fp + fwd * (k * 2.5) + Vector3(0, 1, 0)) * (0.4 if k == 0 else 0.2)
+	b *= maxf(power, 0.03)
 	var target_gain := clampf(0.45 / maxf(b, 0.12), 1.0, 2.3)
 	gain = lerpf(gain, target_gain, dt * 0.8)
 	var lit := clampf(b, 0.0, 1.2)
 	var fogc := Color(0.16, 0.145, 0.085).lerp(Color(0.012, 0.011, 0.01), clampf(1.0 - lit, 0.0, 1.0))
 	RenderingServer.global_shader_parameter_set("g_fog", Vector4(fogc.r, fogc.g, fogc.b, lerpf(0.045, 0.03, clampf(lit, 0.0, 1.0))))
-	RenderingServer.global_shader_parameter_set("g_ambient", 0.012)
+	RenderingServer.global_shader_parameter_set("g_ambient", 0.012 + (1.0 - power) * 0.01)
 	interference = maxf(clampf((8.0 - near_null) / 8.0, 0.0, 1.0) * 0.8, 0.0)
 	if Game.main != null and not ended:
 		Game.main.gain = gain
 		Game.main.interference = maxf(interference, _ent_interference(fp))
 	# гул ламп: громче там, где светло
 	if not demo:
-		Snd.loop("hum", "hum_fluor", clampf(0.25 + b * 0.6, 0.15, 0.85), 0.8)
+		Snd.loop("hum", "hum_fluor", clampf(0.25 + b * 0.6, 0.15, 0.85) * power * power, 0.25)
 		Snd.loop("room", "room_tone", 0.7, 1.0)
 		Snd.loop("null", "null_hum", clampf(1.0 - near_null / 16.0, 0.0, 1.0) * 0.9, 0.4, "Amb")
 
@@ -448,26 +473,52 @@ func wrap_near(p: Vector3, ref: Vector3) -> Vector3:
 	return _wrap_near(p, ref)
 
 
+## Характер группы мигающих ламп: 0 — редкие запинки, 1 — умирающая трубка (гаснет надолго), 2 — гудит и дрожит
+const FLICK_KIND := [0, 1, 2, 0, 1, 2, 1]
+
+
 func _update_flicker(dt: float) -> void:
 	for g in 7:
 		var s: Dictionary = _flick_state[g]
+		var kind: int = FLICK_KIND[g]
 		s.t = float(s.t) - dt
 		if float(s.burst) > 0.0:
+			# заикание: включается-выключается через случайные доли секунды
 			s.burst = float(s.burst) - dt
-			var on := randf() < 0.55
-			flick[g] = (1.0 if on else 0.05) if randf() < 0.6 else float(flick[g])
+			s.sw = float(s.sw) - dt
+			if float(s.sw) <= 0.0:
+				s.sw = randf_range(0.03, 0.11) if kind != 1 else randf_range(0.04, 0.26)
+				s.on = not bool(s.on) if randf() < 0.8 else bool(s.on)
+				flick[g] = randf_range(0.75, 1.0) if bool(s.on) else randf_range(0.0, 0.07)
 			if float(s.burst) <= 0.0:
-				flick[g] = 1.0 if randf() < 0.85 else 0.0
-				if flick[g] == 0.0:
-					s.off = randf_range(0.5, 4.0)
+				if kind == 1 and randf() < 0.5:
+					s.off = randf_range(1.5, 9.0)
+					flick[g] = 0.0
+				else:
+					flick[g] = 1.0
+					s.on = true
 		elif float(s.off) > 0.0:
 			s.off = float(s.off) - dt
 			if float(s.off) <= 0.0:
-				flick[g] = 1.0
-				s.burst = randf_range(0.1, 0.5)
+				# стартер пытается зажечь трубку
+				s.burst = randf_range(0.4, 1.4)
+				_flick_sound(g, true)
 		elif float(s.t) <= 0.0:
-			s.burst = randf_range(0.2, 1.6)
-			s.t = randf_range(2.0, 12.0)
+			match kind:
+				0:
+					s.burst = randf_range(0.08, 0.45)
+					s.t = randf_range(7.0, 26.0)
+				1:
+					s.burst = randf_range(0.4, 2.2)
+					s.t = randf_range(2.5, 9.0)
+				_:
+					s.burst = randf_range(0.05, 0.2)
+					s.t = randf_range(3.0, 11.0)
+			_flick_sound(g, false)
+		elif kind == 2:
+			flick[g] = 0.8 + 0.1 * sin(t * 13.0 + g) + randf_range(-0.07, 0.07)
+		else:
+			flick[g] = 1.0
 	# зелёный свет нулевой зоны — неровная пульсация
 	flick[7] = 0.55 + 0.35 * sin(t * 3.1) * sin(t * 7.7 + 1.0) + (0.3 if randf() < 0.04 else 0.0)
 
@@ -602,17 +653,19 @@ func _physics_process(_dt: float) -> void:
 	if Cfg.has_arg("auto"):
 		_bot(_dt)
 	# провал в яму верхнего слоя
-	if cur == 0 and layers.size() > 1 and player.global_position.y < layer().floor_y - 2.2:
+	if cur == 0 and layers.size() > 1 and player.global_position.y < layer().floor_y - 2.2 \
+			and layer().flo[LD.idx(cell_of(player.global_position).x, cell_of(player.global_position).y)] == LD.F_PIT:
 		var p := player.global_position
 		Game.main.burst(1.0)
 		Game.say("sub.pitfall")
+		_no_fall_t = 8.0
 		change_layer(1, p)
 		Game.main.set_fade(Color(0, 0, 0, 0.7))
 		Game.main.fade_to(Color(0, 0, 0, 0), 1.5)
 		await get_tree().create_timer(2.5).timeout
 		Game.say("sub.lower")
 	# упал куда-то за пределы (страховка)
-	if player.global_position.y < layer().floor_y - 30.0:
+	if player.global_position.y < layer().floor_y - 40.0:
 		var c := cell_of(player.global_position)
 		player.global_position = Vector3((c.x + 0.5) * LD.C, layer().floor_y + 1.0, (c.y + 0.5) * LD.C)
 		player.velocity = Vector3.ZERO
@@ -624,20 +677,55 @@ func _tour(dir: String) -> void:
 	var L := layer()
 	var keys := []
 	for k in L.places.keys():
-		if String(k).begins_with("room_"):
+		if String(k).begins_with(Cfg.arg("tour_prefix", "room_")) and not String(k).ends_with("_c"):
 			keys.append(k)
 	keys.sort()
 	if Cfg.has_arg("only"):
-		keys = keys.filter(func(k: Variant) -> bool: return String(k).contains(Cfg.arg("only")))
+		var only := Cfg.arg("only").split(",")
+		keys = keys.filter(func(k: Variant) -> bool:
+			for o in only:
+				if String(k).contains(o):
+					return true
+			return false)
 	player.bot = false
 	for k in keys:
 		var p: Vector3 = L.places[k]
 		p = wrap_near(p, player.global_position)
+		var ctr := p
+		if L.places.has(String(k) + "_c"):
+			ctr = wrap_near(L.places[String(k) + "_c"], p)
+		var hor := Vector3(ctr.x - p.x, 0, ctr.z - p.z)
+		var structure := hor.length() > 2.0
 		for view in 2:
-			var off := Vector3(0, 0.1, 3.0) if view == 0 else Vector3(0, 0.1, -3.0)
-			player.global_position = p + off
-			player.velocity = Vector3.ZERO
-			player.set_look(0.0 if view == 0 else PI, -0.08)
+			if player.freecam != null:
+				player.toggle_freecam()
+			if String(k).begins_with("find_"):
+				# находка: свободной камерой сверху-сбоку, с двух сторон
+				player.global_position = p + Vector3(0, 0.1, 0)
+				player.velocity = Vector3.ZERO
+				player.toggle_freecam()
+				var off2 := Vector3(1.7, 1.6, 1.7) if view == 0 else Vector3(-1.7, 1.6, -1.7)
+				player.freecam.global_position = p + off2
+				player.freecam.look_at(p + Vector3(0, 0.4, 0))
+				player.freecam.yaw = player.freecam.rotation.y
+				player.freecam.pitch = player.freecam.rotation.x
+			elif structure:
+				# конструкция: от входа лицом к центру; второй кадр — свободной камерой сверху
+				var dirv := hor.normalized()
+				player.global_position = p + Vector3(0, 0.1, 0) - dirv * 0.6
+				player.velocity = Vector3.ZERO
+				player.set_look(atan2(-dirv.x, -dirv.z), -0.12)
+				if view == 1:
+					player.toggle_freecam()
+					player.freecam.global_position = p - dirv * 1.5 + Vector3(0, 4.5, 0)
+					player.freecam.look_at(ctr + Vector3(0, -0.5, 0))
+					player.freecam.yaw = player.freecam.rotation.y
+					player.freecam.pitch = player.freecam.rotation.x
+			else:
+				var off := Vector3(0, 0.1, 3.0) if view == 0 else Vector3(0, 0.1, -3.0)
+				player.global_position = p + off
+				player.velocity = Vector3.ZERO
+				player.set_look(0.0 if view == 0 else PI, -0.08)
 			_sync_load(player.global_position, 1)
 			gain = 1.0
 			for f in 30:
@@ -647,3 +735,129 @@ func _tour(dir: String) -> void:
 			Game.main.screenshot(dir + "/" + String(k) + "_" + str(view) + ".png")
 		print("TOUR ", k)
 	get_tree().quit()
+
+
+# ------------------------------------------------------------ ранения
+
+## Приземление: высота падения по скорости (v² = 2gh). До 2,3 м — ничего, дальше кадр краснеет, с ~7 м — смерть
+func _on_landed(speed: float) -> void:
+	if _no_fall_t > 0.0 or ended:
+		return
+	var h := speed * speed / (2.0 * Player.GRAV)
+	if h < 2.3:
+		return
+	var dmg := (h - 2.3) / 4.8
+	Snd.play("body_fall", -2.0 + minf(dmg * 6.0, 6.0), randf_range(0.9, 1.05))
+	if dmg < 1.0:
+		Snd.play("grunt", -6.0, randf_range(0.9, 1.05))
+	hurt_add(dmg)
+
+
+## Получить урон: кадр вспыхивает красным, раны отпускают медленно; набралось 1 — смерть
+func hurt_add(v: float) -> void:
+	hurt += v
+	_hurt_cd = 7.0
+	Game.main.hurt_flash = clampf(0.5 + v, 0.0, 1.0)
+	Game.main.burst(clampf(v, 0.2, 1.0))
+	if player != null:
+		player.shake = maxf(player.shake, clampf(0.5 + v, 0.0, 1.0))
+	if hurt >= 1.0:
+		if Cfg.has_arg("god"):
+			hurt = 0.92
+		else:
+			hurt = 1.0
+			Game.main.hurt = 1.0
+			Game.die()
+
+
+func _hurt_tick(dt: float) -> void:
+	_no_fall_t = maxf(0.0, _no_fall_t - dt)
+	if hurt > 0.0:
+		_hurt_cd -= dt
+		if _hurt_cd <= 0.0:
+			hurt = maxf(0.0, hurt - dt * 0.018)
+	if Game.main != null and not ended:
+		Game.main.hurt = move_toward(Game.main.hurt, hurt, dt * 1.5)
+
+
+# ------------------------------------------------------------ лампы: звук мигания и питание
+
+## Щелчок/жужжание ближайшей мигающей лампы этой группы (если она рядом с героем)
+func _flick_sound(g: int, start: bool) -> void:
+	if demo or player == null:
+		return
+	var L := layer()
+	var pc := cell_of(player.global_position)
+	var best := Vector2i(999999, 0)
+	var bd := 99
+	for dz in range(-4, 5):
+		for dx in range(-4, 5):
+			var x := pc.x + dx
+			var z := pc.y + dz
+			if L.light[LD.idx(x, z)] != LD.L_FLICK or posmod(x * 7 + z * 13, 7) != g:
+				continue
+			var d := absi(dx) + absi(dz)
+			if d < bd:
+				bd = d
+				best = Vector2i(x, z)
+	if best.x == 999999:
+		return
+	var c := LD.cell_center(best.x, best.y)
+	var p := Vector3(c.x, L.floor_y + L.height_m(best.x, best.y) - 0.1, c.y)
+	Snd.play_at("lamp_start" if start else "lamp_buzz", p, self, -8.0, randf_range(0.9, 1.1), 16.0, 2.0)
+
+
+## Питание: редкие просадки (все лампы проседают и дрожат) и ещё более редкие отключения на несколько секунд
+func _update_power(dt: float) -> void:
+	if _power_t <= 0.0 and _power_ev == "":
+		_power_t = randf_range(120.0, 300.0) if Game.run_time < 60.0 else randf_range(90.0, 260.0)
+	if Cfg.has_arg("blackout") and Game.run_time > 3.0 and _power_ev == "" and not has_meta("bo_done"):
+		set_meta("bo_done", true)
+		_power_t = 0.01
+	match _power_ev:
+		"":
+			power = move_toward(power, 1.0, dt * 2.0)
+			_power_t -= dt
+			if _power_t <= 0.0 and not ended:
+				var out := randf() < (0.4 if Game.survival() else 0.3) or Cfg.has_arg("blackout")
+				_power_ev = "out" if out else "dip"
+				_power_age = 0.0
+				_power_left = randf_range(6.0, 14.0) if out else randf_range(0.5, 1.6)
+				Snd.play("power_down" if out else "power_dip", -4.0 if out else -8.0)
+				if out:
+					Game.main.burst(0.4)
+		"dip":
+			_power_left -= dt
+			power = clampf(0.45 + 0.25 * sin(t * 31.0) + randf_range(-0.15, 0.15), 0.12, 0.9)
+			if _power_left <= 0.0:
+				_power_ev = ""
+				_power_t = 0.0
+		"out":
+			_power_left -= dt
+			_power_age += dt
+			# сначала гаснет с запинкой, потом — полная темнота
+			if _power_age < 0.7:
+				power = randf_range(0.1, 0.8) if randf() < 0.25 else move_toward(power, 0.0, dt * 2.5)
+			else:
+				power = 0.0
+			if _power_left <= 0.0:
+				_power_ev = "back"
+				_power_age = 0.0
+				_power_left = randf_range(1.2, 2.4)
+				Snd.play("power_up", -5.0)
+		"back":
+			_power_left -= dt
+			_power_age += dt
+			# лампы «схватываются» по очереди: редкие короткие вспышки, потом ровный свет
+			if _power_left > 0.5:
+				if _power_age > 0.08:
+					_power_age = 0.0
+					power = randf_range(0.5, 1.0) if randf() < 0.45 else randf_range(0.0, 0.15)
+			else:
+				power = move_toward(power, 1.0, dt * 3.0)
+			if _power_left <= 0.0:
+				_power_ev = ""
+				_power_t = 0.0
+	RenderingServer.global_shader_parameter_set("g_power", power)
+	if Cfg.has_arg("blackout") and Engine.get_process_frames() % 30 == 0:
+		print("POWER t=%.1f ev=%s p=%.2f left=%.1f" % [Game.run_time, _power_ev, power, _power_left])

@@ -152,7 +152,7 @@ func _physics_process(dt: float) -> void:
 		var dir := want.normalized()
 		global_position += dir * cur_speed * dt
 		rotation.y = lerp_angle(rotation.y, atan2(dir.x, dir.z), dt * 3.0)
-	global_position.y = L.floor_y
+	global_position.y = L.ground(global_position)
 	_walk(dt)
 	if d < 1.0 and not Cfg.has_arg("god"):
 		Game.die()

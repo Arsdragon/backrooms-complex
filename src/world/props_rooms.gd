@@ -35,6 +35,13 @@ static func spawn(cx: Node3D, d: Dictionary, rng: RandomNumberGenerator, layer: 
 		"drips": return drips(rng)
 		"chairs": return chairs(d, rng)
 		"tv_stack": return tv_stack(cx, rng)
+		"railing": return railing(d, rng)
+		"hazmat": return hazmat(cx, d, rng)
+		"clothes": return clothes(rng)
+		"tripod_cam": return tripod_cam(rng)
+		"drag": return drag(rng)
+		"lone_door": return lone_door(rng)
+		"lost_camp": return lost_camp(cx, rng)
 	return null
 
 
@@ -70,7 +77,7 @@ static func door(d: Dictionary) -> Node3D:
 	root.scale = Vector3.ONE * s
 	if kind == "ceiling":
 		root.rotation.x = -PI * 0.5
-		root.position = Vector3(0, 2.68, 0.0)
+		root.position = Vector3(0, float(d.get("ceil", 2.7)) - 0.02, 0.0)
 	var frame := P.m_plastic(Color(0.86, 0.84, 0.78))
 	var leafc := Color(0.55, 0.42, 0.3) if rng_pick(d) < 0.5 else Color(0.72, 0.7, 0.64)
 	var leafm := Mats.col(leafc, "wood", 0.7)
@@ -600,3 +607,177 @@ class RatNode extends Node3D:
 			if _run <= 0.0:
 				_done = true
 				visible = false
+
+
+# ------------------------------------------------------------ перила над провалами
+
+## Перила длиной len вдоль локальной +x: стойки, поручень, средняя перекладина; иногда сломаны
+static func railing(d: Dictionary, rng: RandomNumberGenerator) -> Node3D:
+	var n := Node3D.new()
+	var length := float(d.get("len", 2.4))
+	var broken := bool(d.get("broken", false))
+	var m := Mats.col(Color(0.62, 0.6, 0.52), "metal", 0.5)
+	var posts := int(round(length / 1.2))
+	for k in posts + 1:
+		var px := k * length / posts
+		if broken and k == posts / 2 + 1:
+			# стойка погнута и лежит
+			P.box(n, Vector3(0.05, 1.0, 0.05), Vector3(px, 0.08, 0.35), m, Vector3(PI * 0.5, 0, 0.3))
+			continue
+		P.box(n, Vector3(0.045, 1.02, 0.045), Vector3(px, 0.51, 0), m)
+	if broken:
+		var cut := length * rng.randf_range(0.35, 0.65)
+		P.box(n, Vector3(cut, 0.05, 0.05), Vector3(cut * 0.5, 1.0, 0), m)
+		P.box(n, Vector3(length - cut - 0.3, 0.05, 0.05), Vector3(cut + 0.3 + (length - cut - 0.3) * 0.5, 0.92, 0.04), m, Vector3(0, 0, -0.12))
+		P.collider(n, Vector3(cut, 1.05, 0.1), Vector3(cut * 0.5, 0.52, 0))
+	else:
+		P.box(n, Vector3(length, 0.05, 0.06), Vector3(length * 0.5, 1.02, 0), m)
+		P.box(n, Vector3(length, 0.03, 0.03), Vector3(length * 0.5, 0.52, 0), m)
+		P.collider(n, Vector3(length, 1.05, 0.1), Vector3(length * 0.5, 0.52, 0))
+	return n
+
+
+# ------------------------------------------------------------ находки
+
+## Сотрудник Async в жёлтом костюме химзащиты: сидит у стены, уронив голову, или лежит ничком. Рядом — его вещи
+static func hazmat(cx: Node3D, d: Dictionary, rng: RandomNumberGenerator) -> Node3D:
+	var n := Node3D.new()
+	var h := Human.make("explorer", int(d.get("seed", rng.randi())), true)
+	n.add_child(h)
+	h.react = false
+	# костюм — ровный жёлтый прорезинённый, текстуры пожарного чуть проступают
+	h.tune({"pale": 0.0, "smear": 0.0, "tex_mix": 0.2, "color": Vector3(0.95, 0.7, 0.1), "wet": 0.25})
+	var pz := String(d.get("pose", ""))
+	var lying := pz == "lie" or (pz == "" and rng.randf() < 0.4)
+	if lying:
+		h.pose("stand")
+		h._r("sh_l", -0.3, 0, 0.5)
+		h._r("sh_r", 0.4, 0, -0.3)
+		h._r("hip_r", -0.3)
+		h._r("kn_r", 0.6)
+		h.rotation = Vector3(-PI * 0.5, rng.randf() * TAU, 0)
+		h.position = Vector3(0, 0.11, 0)
+	else:
+		# сидит на полу, спиной к стене; голова завалилась набок, руки опущены
+		h.pose("sit_ground")
+		h._r("spine", -0.18)
+		h._r("neck", 0.3, 0.25, 0.55)
+		h._r("sh_l", 0.25, 0, 0.3)
+		h._r("sh_r", 0.25, 0, -0.3)
+		h._r("el_l", -0.05)
+		h._r("el_r", -0.05)
+		h.position = Vector3(0, 0, -0.18)
+	# капюшон, тёмное стекло маски, фильтр
+	var rub := Mats.col(Color(0.95, 0.72, 0.12), "fabric", 0.35, {"wet": 0.3})
+	var hf := h.head_frame()
+	if hf != null:
+		P.sph(hf, 0.15, Vector3(0, 0.07, -0.01), rub, Vector3(1.0, 1.18, 1.08), 12)
+		# широкое тёмное стекло в чёрной рамке и два фильтра по бокам
+		P.box(hf, Vector3(0.21, 0.13, 0.03), Vector3(0, 0.075, 0.14), P.m_black(), Vector3(-0.12, 0, 0))
+		P.box(hf, Vector3(0.18, 0.1, 0.01), Vector3(0, 0.076, 0.157), Mats.col(Color(0.12, 0.16, 0.16), "metal", 0.05, {"wet": 1.0}), Vector3(-0.12, 0, 0))
+		for sx in [-0.075, 0.075]:
+			P.cyl(hf, 0.04, 0.04, 0.05, Vector3(sx, -0.02, 0.14), P.m_black(), Vector3(PI * 0.5, sx * 4.0, 0), 10)
+	# рядом — кейс, фонарь, иногда планшет с запиской
+	var side := 1.0 if rng.randf() < 0.5 else -1.0
+	P.box(n, Vector3(0.45, 0.14, 0.32), Vector3(0.65 * side, 0.07, 0.25), Mats.col(Color(0.2, 0.22, 0.2), "metal", 0.4), Vector3(0, rng.randf() * 0.6, 0))
+	P.cyl(n, 0.025, 0.025, 0.22, Vector3(-0.5 * side, 0.03, 0.45), P.m_black(), Vector3(0, rng.randf() * TAU, PI * 0.5), 8)
+	if bool(d.get("note", false)):
+		var note := P.note(cx, {"key": String(d.get("key", "note.a_hz1")), "p": Vector3.ZERO, "clip": true})
+		n.add_child(note)
+		note.position = Vector3(0.3 * side, 0.0, 0.6)
+	var st := P.stain({"wet": true, "s": 1.6}, rng)
+	n.add_child(st)
+	return n
+
+
+## Аккуратно сложенная одежда и ботинки — человека нет
+static func clothes(rng: RandomNumberGenerator) -> Node3D:
+	var n := Node3D.new()
+	var cols := [Color(0.25, 0.3, 0.45), Color(0.6, 0.55, 0.45), Color(0.15, 0.15, 0.17), Color(0.55, 0.2, 0.18)]
+	var y := 0.0
+	for k in rng.randi_range(2, 4):
+		var th := rng.randf_range(0.03, 0.06)
+		P.box(n, Vector3(0.42 - k * 0.03, th, 0.32 - k * 0.02), Vector3(0, y + th * 0.5, 0), P.m_cloth(cols[rng.randi_range(0, cols.size() - 1)]), Vector3(0, rng.randf_range(-0.08, 0.08), 0))
+		y += th
+	for sx in [-0.1, 0.1]:
+		P.box(n, Vector3(0.1, 0.09, 0.27), Vector3(sx, 0.045, 0.42), Mats.col(Color(0.12, 0.08, 0.06), "metal", 0.3))
+	if rng.randf() < 0.5:
+		P.box(n, Vector3(0.08, 0.02, 0.14), Vector3(0.05, y + 0.01, 0.02), Mats.col(Color(0.1, 0.1, 0.1), "metal", 0.5))
+	return n
+
+
+## Видеокамера на штативе снимает стену; огонёк записи горит
+static func tripod_cam(rng: RandomNumberGenerator) -> Node3D:
+	var n := Node3D.new()
+	var blk := P.m_black()
+	for k in 3:
+		var a := k * TAU / 3.0
+		P.rod(n, Vector3(0, 1.25, 0), Vector3(cos(a) * 0.38, 0, sin(a) * 0.38), 0.012, blk, 4)
+	P.box(n, Vector3(0.12, 0.13, 0.28), Vector3(0, 1.36, 0.02), Mats.col(Color(0.16, 0.16, 0.17), "metal", 0.3))
+	P.cyl(n, 0.045, 0.045, 0.09, Vector3(0, 1.37, 0.2), blk, Vector3(PI * 0.5, 0, 0), 10)
+	var rec := P.sph(n, 0.01, Vector3(0.04, 1.44, 0.14), P.m_emit(Color(1, 0.05, 0.05), 3.0))
+	rec.set_meta("blink", true)
+	var se := P.SoundEmitter.new()
+	se.snd = "engine_tick"
+	se.every = 0.0
+	se.vol = -24.0
+	se.max_dist = 4.0
+	se.position = Vector3(0, 1.36, 0)
+	n.add_child(se)
+	return n
+
+
+## Следы волочения: тёмная полоса уходит прямо в стену
+static func drag(rng: RandomNumberGenerator) -> Node3D:
+	var n := Node3D.new()
+	var mat := P.decal_mat("drag", {"stripes": 1.0, "tint": Color(0.16, 0.025, 0.015, 0.55)})
+	var q := P.quad(n, Vector2(0.55, 2.3), Vector3(0, 0.006, -1.15), mat, Vector3(-PI * 0.5, 0, 0))
+	q.set_instance_shader_parameter("seed", rng.randf() * 10.0)
+	var hm := P.decal_mat("hand", {"radial": 1.0, "tint": Color(0.18, 0.03, 0.02, 0.6)})
+	P.quad(n, Vector2(0.14, 0.18), Vector3(0.12, 0.007, -0.3), hm, Vector3(-PI * 0.5, 0, 0.3))
+	return n
+
+
+## Дверь в раме посреди зала: открывается — за ней тот же зал
+static func lone_door(rng: RandomNumberGenerator) -> Node3D:
+	var n := Node3D.new()
+	var frame := P.m_plastic(Color(0.84, 0.82, 0.76))
+	var leafc := Color(0.55, 0.42, 0.3) if rng.randf() < 0.5 else Color(0.72, 0.7, 0.64)
+	P.box(n, Vector3(0.08, 2.15, 0.12), Vector3(-0.5, 1.075, 0), frame)
+	P.box(n, Vector3(0.08, 2.15, 0.12), Vector3(0.5, 1.075, 0), frame)
+	P.box(n, Vector3(1.08, 0.08, 0.12), Vector3(0, 2.15, 0), frame)
+	var hinge := Node3D.new()
+	hinge.position = Vector3(-0.46, 0, 0)
+	n.add_child(hinge)
+	P.box(hinge, Vector3(0.92, 2.08, 0.045), Vector3(0.46, 1.05, 0), Mats.col(leafc, "wood", 0.5))
+	P.sph(hinge, 0.03, Vector3(0.84, 1.0, 0.04), P.m_metal())
+	var col := P.collider(hinge, Vector3(0.92, 2.08, 0.06), Vector3(0.46, 1.05, 0))
+	P.collider(n, Vector3(0.1, 2.2, 0.14), Vector3(-0.5, 1.1, 0))
+	P.collider(n, Vector3(0.1, 2.2, 0.14), Vector3(0.5, 1.1, 0))
+	var opened := [false]
+	P.interactable(n, Vector3(1.0, 2.0, 0.4), Vector3(0, 1.0, 0), "ui.door", func() -> void:
+		if opened[0]:
+			return
+		opened[0] = true
+		Snd.play("door_open", -4.0, randf_range(0.95, 1.05))
+		var tw := n.create_tween()
+		tw.tween_property(hinge, "rotation:y", -1.6, 1.4).set_trans(Tween.TRANS_SINE)
+		col.collision_layer = 0)
+	return n
+
+
+## Чья-то ночёвка: одеяло, пустые банки, фонарик без батареек, зарубки на стене
+static func lost_camp(cx: Node3D, rng: RandomNumberGenerator) -> Node3D:
+	var n := Node3D.new()
+	P.box(n, Vector3(0.9, 0.05, 1.9), Vector3(0, 0.025, 0), P.m_cloth(Color(0.35, 0.28, 0.22)), Vector3(0, rng.randf_range(-0.2, 0.2), 0))
+	P.box(n, Vector3(0.5, 0.12, 0.3), Vector3(0, 0.08, -0.75), P.m_cloth(Color(0.5, 0.45, 0.4)))
+	for k in rng.randi_range(4, 8):
+		var a := rng.randf() * TAU
+		var r := rng.randf_range(0.7, 1.3)
+		var lying := rng.randf() < 0.5
+		P.cyl(n, 0.035, 0.035, 0.11, Vector3(cos(a) * r, 0.035 if lying else 0.055, sin(a) * r), P.m_metal(), Vector3(PI * 0.5 if lying else 0.0, rng.randf() * TAU, 0), 8)
+	P.cyl(n, 0.022, 0.022, 0.18, Vector3(0.6, 0.022, 0.5), P.m_black(), Vector3(0, 0.4, PI * 0.5), 8)
+	var lb := P.label("|||| |||| |||| |||| |||| ||", P.font_hand(), 0.0035, Color(0.12, 0.1, 0.08))
+	lb.position = Vector3(0, 0.75, -1.08)
+	n.add_child(lb)
+	return n
