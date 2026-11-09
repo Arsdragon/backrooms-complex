@@ -163,6 +163,15 @@ func go_menu() -> void:
 		menus.show_main()
 	main.fade_to(Color(0, 0, 0, 0), 1.5)
 	_debug_menu()
+	# автотест: после смерти/концовки — снова в Комплекс тем же миром
+	if Cfg.has_arg("auto_restart") and not layers.is_empty():
+		await get_tree().create_timer(2.0).timeout
+		if state == "menu":
+			print("RESTART")
+			Snd.stop_loop("menu_hum", 0.3)
+			menus.hide_all()
+			run_time = 0.0
+			start_complex(false)
 	Snd.loop("menu_hum", "hum_fluor", 0.5, 2.0)
 
 
@@ -285,6 +294,34 @@ func start_complex(lower := false, from_fall := false) -> void:
 	if Cfg.has_arg("hurt"):
 		cx.hurt = float(Cfg.arg("hurt"))
 		cx._hurt_cd = 9999.0
+	if Cfg.has_arg("near"):
+		_near_test(float(Cfg.arg("near")))
+
+
+## Отладка: --near=<м> — через 6 с напечатать видимые меши в этом радиусе от героя (что это за предмет)
+func _near_test(r: float, root: Node3D = null) -> void:
+	await get_tree().create_timer(6.0).timeout
+	if root == null:
+		root = complex
+	if root == null or not is_instance_valid(root):
+		return
+	var pl: Node3D = root.get("player")
+	print("NEAR player=%s" % pl.global_position)
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		for ch in n.get_children():
+			stack.append(ch)
+		if n is VisualInstance3D and (n as VisualInstance3D).is_visible_in_tree():
+			var vi := n as VisualInstance3D
+			var ab: AABB = vi.global_transform * vi.get_aabb()
+			if ab.size.length() < 40.0 and ab.grow(0.1).intersects(AABB(pl.global_position - Vector3(r, r, r), Vector3(r, r, r) * 2.0)):
+				var host: Node = vi
+				while host != null and host != root and not host.has_meta("k"):
+					host = host.get_parent()
+				var kk: String = str(host.get_meta("k")) if host != null and host.has_meta("k") else "?"
+				var hp: Vector3 = (host as Node3D).global_position if host is Node3D else Vector3.ZERO
+				print("NEAR k=%s at=%s %s/%s center=%s size=%s" % [kk, hp, vi.get_parent().name, vi.name, ab.get_center(), ab.size])
 
 
 ## Отладка: --walk=<сек> — встать лицом к центру места (--place) и идти вперёд, печатая высоту и ранение
@@ -453,15 +490,13 @@ func ending(kind: String) -> void:
 	if kind == "null":
 		# случайный выход всегда смертелен
 		var r := randf()
-		if r < 0.2:
+		if r < 0.22:
 			k = "ocean"
-		elif r < 0.38:
+		elif r < 0.42:
 			k = "sky"
-		elif r < 0.55:
-			k = "basement"
-		elif r < 0.7:
+		elif r < 0.62:
 			k = "highway"
-		elif r < 0.84:
+		elif r < 0.8:
 			k = "wall"
 		else:
 			k = "space"
@@ -471,6 +506,7 @@ func ending(kind: String) -> void:
 
 
 func start_ending(k: String) -> void:
+	print("ENDING ", k)
 	state = "ending"
 	complex = null
 	var e := EndingS.new()
@@ -485,7 +521,12 @@ func show_card(k: String) -> void:
 	var c := CardS.new()
 	main.ui.add_child(c)
 	c.open(Loc.t("end.%s_t" % k), Loc.t("end." + k))
-	await c.closed
+	print("CARD ", k)
+	if Cfg.has_arg("auto"):
+		# автотест: карточку не ждём
+		await get_tree().create_timer(4.0).timeout
+	else:
+		await c.closed
 	c.queue_free()
 	main.fade_to(Color(0, 0, 0, 1), 0.6)
 	await get_tree().create_timer(0.7).timeout

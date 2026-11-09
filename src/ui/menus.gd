@@ -244,7 +244,7 @@ func _build_polygon() -> void:
 	_pbtn(c1, "poly.house", func() -> void: Game.poly_complex(true, "house"))
 	_pbtn(c1, "poly.rooms", func() -> void: show_rooms())
 	var c2 := _poly_col(poly_box, 425, "poly.c_ends")
-	for k in ["ocean", "sky", "basement", "highway", "wall", "space", "async"]:
+	for k in ["ocean", "sky", "highway", "wall", "space", "async"]:
 		var kk: String = k
 		_pbtn(c2, "poly.e_" + kk, func() -> void: Game.poly_ending(kk))
 	_pbtn(c2, "poly.e_death", func() -> void: Game.poly_death())

@@ -24,16 +24,51 @@ static func _scene(id: String) -> PackedScene:
 
 
 ## Экземпляр модели. complex=true — материалы Комплекса; extra — доп. параметры шейдера (pale, smear, mold…)
+## Наборы Poly Haven, где в одном файле лежат несколько вариантов или все детали конструктора:
+## оставляем только перечисленные меши одного предмета и ставим его по центру
+const PARTS := {
+	"modular_street_seating": ["crossbar", "legs_double", "legs_single", "suspended_support_01", "back_support_r", "back_support_l",
+		"arm_rest_01", "arm_rest_02", "seat", "seat_back"],
+	"metal_trash_can": ["metal_trash_can", "metal_trash_can_handle_left", "metal_trash_can_handle_right"],
+	"exterior_aircon_unit": ["exterior_aircon_unit_rusted"],
+	"fire_hydrant": ["fire_hydrant_aged", "fire_hydrant_cap_01_aged", "fire_hydrant_cap_02_aged", "fire_hydrant_cap_03_aged", "fire_hydrant_chain_aged"],
+	"old_military_crate": ["old_military_crate_a", "old_military_crate_lid_a", "old_military_crate_loop_a", "old_military_crate_latch_a", "old_military_crate_cloth_a"],
+	"vintage_suitcase": ["vintage_suitcase_01_bottom", "vintage_suitcase_01_clasp", "vintage_suitcase_01_handle", "vintage_suitcase_01_top"],
+}
+
+
 static func make(id: String, complex := true, extra := {}) -> Node3D:
 	var ps := _scene(id)
 	if ps == null:
 		return null
 	var n := ps.instantiate() as Node3D
+	if PARTS.has(id):
+		_keep_parts(n, PARTS[id])
 	if complex:
 		_convert(n, extra)
 	else:
 		_shadows(n)
 	return n
+
+
+static func _keep_parts(n: Node3D, keep: Array) -> void:
+	var box := AABB()
+	var first := true
+	for mi in _meshes(n):
+		var m := mi as MeshInstance3D
+		if not keep.has(String(m.name)):
+			m.get_parent().remove_child(m)
+			m.free()
+			continue
+		var bb := _rel_xform(m, n) * m.get_aabb()
+		box = bb if first else box.merge(bb)
+		first = false
+	if first:
+		return
+	var c := box.get_center()
+	for ch in n.get_children():
+		if ch is Node3D:
+			(ch as Node3D).position -= Vector3(c.x, 0.0, c.z)
 
 
 static func _shadows(n: Node) -> void:

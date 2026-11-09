@@ -23,9 +23,6 @@ var _vel := Vector3.ZERO
 var _subject: Human = null
 var _cctv := false
 var _lines_left: Array = []
-var _hatch_tries := 0
-var _hatch_busy := false
-var _given_up := -1.0
 var _hurt := 0.0               # красное в кадре 0..1 (Game.main.hurt); 1 — смерть
 var _hurt_rate := 0.0          # сколько прибавляется в секунду
 var _stroke := 0.0
@@ -87,7 +84,6 @@ func begin() -> void:
 	match kind:
 		"ocean": _ocean()
 		"sky": _sky()
-		"basement": _basement()
 		"highway": _highway()
 		"wall": _wall()
 		"space": _space()
@@ -427,219 +423,18 @@ func _sky_tick(dt: float) -> void:
 		_death("sky")
 
 
-# ======================================================================= ПОДВАЛ
-
-func _basement() -> void:
-	_env_base(Color(0, 0, 0))
-	env.ambient_light_color = Color(0.05, 0.045, 0.04)
-	var conc := StandardMaterial3D.new()
-	conc.albedo_texture = Mats.tex("concrete_dirty")
-	conc.uv1_scale = Vector3(2, 2, 1)
-	conc.uv1_triplanar = true
-	conc.roughness = 1.0
-	var room := Node3D.new()
-	add_child(room)
-	var w := 4.0
-	var d := 5.0
-	var h := 2.35
-	_box(room, Vector3(w + 0.4, 0.2, d + 0.4), Vector3(0, -0.1, 0), conc, true)
-	_box(room, Vector3(w + 0.4, 0.2, d + 0.4), Vector3(0, h + 0.1, 0), conc, true)
-	_box(room, Vector3(0.2, h, d), Vector3(-w * 0.5 - 0.1, h * 0.5, 0), conc, true)
-	_box(room, Vector3(0.2, h, d), Vector3(w * 0.5 + 0.1, h * 0.5, 0), conc, true)
-	_box(room, Vector3(w, h, 0.2), Vector3(0, h * 0.5, -d * 0.5 - 0.1), conc, true)
-	_box(room, Vector3(w, h, 0.2), Vector3(0, h * 0.5, d * 0.5 + 0.1), conc, true)
-	# заложенный кирпичом проём
-	var brick := StandardMaterial3D.new()
-	brick.albedo_color = Color(0.45, 0.28, 0.22)
-	brick.albedo_texture = Mats.tex("tile")
-	brick.uv1_scale = Vector3(3, 2, 1)
-	_box(room, Vector3(1.0, 2.0, 0.05), Vector3(1.0, 1.0, -d * 0.5 + 0.02), brick, false)
-	# лестница к люку в потолке
-	var wood := StandardMaterial3D.new()
-	wood.albedo_texture = Mats.tex("wood")
-	for k in 9:
-		_box(room, Vector3(0.9, 0.06, 0.28), Vector3(-1.4, 0.25 + k * 0.24, 1.6 - k * 0.24), wood, false)
-	_box(room, Vector3(0.05, 0.1, 2.9), Vector3(-1.87, 1.25, 0.65), wood, false).rotation.x = deg_to_rad(45.0)
-	var ramp := StaticBody3D.new()
-	var rcs := CollisionShape3D.new()
-	var rsh := BoxShape3D.new()
-	rsh.size = Vector3(0.9, 0.1, 3.2)
-	rcs.shape = rsh
-	ramp.add_child(rcs)
-	ramp.position = Vector3(-1.4, 1.12, 0.62)
-	ramp.rotation.x = deg_to_rad(45.0)
-	room.add_child(ramp)
-	# люк: тяжёлые доски, петли, кольцо-ручка
-	var hatch := Node3D.new()
-	hatch.name = "Hatch"
-	room.add_child(hatch)
-	hatch.position = Vector3(-1.4, h - 0.04, -0.55)
-	var hw := StandardMaterial3D.new()
-	hw.albedo_texture = Mats.tex("wood")
-	hw.albedo_color = Color(0.7, 0.6, 0.5)
-	for k in 4:
-		_box(hatch, Vector3(0.21, 0.05, 0.9), Vector3(-0.32 + k * 0.215, 0, 0), hw, false)
-	var iron := StandardMaterial3D.new()
-	iron.albedo_color = Color(0.15, 0.14, 0.13)
-	iron.metallic = 0.6
-	_box(hatch, Vector3(0.9, 0.03, 0.08), Vector3(0, -0.03, 0.3), iron, false)
-	_box(hatch, Vector3(0.9, 0.03, 0.08), Vector3(0, -0.03, -0.3), iron, false)
-	var ring := MeshInstance3D.new()
-	var tm := TorusMesh.new()
-	tm.inner_radius = 0.04
-	tm.outer_radius = 0.06
-	ring.mesh = tm
-	ring.material_override = iron
-	ring.position = Vector3(0, -0.07, 0)
-	ring.rotation.x = PI * 0.5
-	hatch.add_child(ring)
-	Props.interactable(hatch, Vector3(1.0, 0.4, 1.0), Vector3(0, -0.15, 0), "ui.hatch", _try_hatch)
-	# полки, коробки, ящики, шина
-	var rr := RandomNumberGenerator.new()
-	rr.seed = 51
-	if Props.model(room, "steel_frame_shelves_01", Vector3(1.6, 0, 1.0), -PI * 0.5, 0.1) != null:
-		for k in 3:
-			Props.model(room, "cardboard_box_01", Vector3(1.6, 0.05 + k * 0.52, 0.8 + k * 0.2), rr.randf_range(-0.4, 0.4), 0.8, false)
-	else:
-		for k in 3:
-			_box(room, Vector3(0.4, 0.04, 1.6), Vector3(1.75, 0.5 + k * 0.5, 1.2), wood, false)
-	Props.model(room, "plastic_crate_01", Vector3(-1.5, 0, -1.8), 0.4)
-	Props.model(room, "plastic_crate_01", Vector3(-1.45, 0.27, -1.75), 0.9, 1.0, false)
-	Props.model(room, "cardboard_box_01", Vector3(0.9, 0, -2.0), 0.2)
-	Props.model(room, "old_tyre", Vector3(-1.75, 0.3, 0.4), PI * 0.5, 1.0, false)
-	# зарубки на стене
-	var lb := Props.label("||||  ||||  ||||  ||||  |||", Props.font_hand(), 0.004, Color(0.1, 0.09, 0.08))
-	lb.position = Vector3(-w * 0.5 + 0.005, 1.3, -0.6)
-	lb.rotation.y = PI * 0.5
-	lb.visibility_range_end = 0.0
-	room.add_child(lb)
-	var lamp := OmniLight3D.new()
-	lamp.position = Vector3(0.2, h - 0.35, 0.3)
-	lamp.light_color = Color(1.0, 0.82, 0.55)
-	lamp.light_energy = 1.4
-	lamp.omni_range = 6.0
-	lamp.shadow_enabled = true
-	lamp.name = "Bulb"
-	add_child(lamp)
-	var bulb := MeshInstance3D.new()
-	var bs := SphereMesh.new()
-	bs.radius = 0.05
-	bs.height = 0.1
-	bulb.mesh = bs
-	var bm := StandardMaterial3D.new()
-	bm.emission_enabled = true
-	bm.emission = Color(1.0, 0.85, 0.6)
-	bm.emission_energy_multiplier = 6.0
-	bulb.material_override = bm
-	bulb.position = lamp.position
-	bulb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	bulb.name = "BulbMesh"
-	add_child(bulb)
-	var cord := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 0.006
-	cm.bottom_radius = 0.006
-	cm.height = 0.3
-	cord.mesh = cm
-	cord.position = lamp.position + Vector3(0, 0.2, 0)
-	cord.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(cord)
-	lamp.position.y -= 0.12
-	player = Player.new()
-	add_child(player)
-	player.global_position = Vector3(0, 0.05, -0.5)
-	player.set_look(PI, 0.0)
-	player.surface_fn = func(_p: Vector3) -> String: return "concrete"
-	Snd.loop("upstairs", "upstairs_tv", 0.55, 2.0)
-	Snd.play("thud_land", -2.0)
-	player.shake = 1.0
-
-
-## Попытка открыть люк: упирается, толкает, бьёт — заколочен снаружи
-func _try_hatch() -> void:
-	if _hatch_busy or _given_up >= 0.0 or player == null:
-		return
-	_hatch_busy = true
-	_hatch_tries += 1
-	player.frozen = true
-	var n := _hatch_tries
-	var pushes := 2 + mini(n, 3)
-	for i in pushes:
-		Snd.play("hatch_strain", randf_range(-3.0, 1.0), randf_range(0.9, 1.1))
-		if i % 2 == 0:
-			Snd.play("grunt", -4.0, randf_range(0.92, 1.08))
-		player.shake = 0.6 + n * 0.1
-		if Game.main != null:
-			Game.main.burst(0.25)
-		await get_tree().create_timer(0.55).timeout
-	if n >= 3:
-		for i in 4:
-			Snd.play("knock", 2.0, randf_range(0.85, 1.0))
-			player.shake = 0.5
-			await get_tree().create_timer(0.4).timeout
-	Game.say("sub.hatch%d" % mini(n, 5))
-	# сбитые в кровь руки
-	_hurt = minf(_hurt + 0.06 + n * 0.025, 0.7)
-	if Game.main != null:
-		Game.main.hurt_flash = 0.5
-	Snd.loop_vol("upstairs", 0.55, 0.5)
-	player.frozen = false
-	_hatch_busy = false
-	if n >= 5:
-		# сдался: садится под люком
-		_given_up = t
-		player.frozen = true
-		player.cine = true
-		var tw := create_tween().set_parallel(true)
-		tw.tween_property(player.head, "position", Vector3(0, 0.75, 0), 2.5).set_trans(Tween.TRANS_SINE)
-		tw.tween_property(player.cam, "rotation", Vector3(-0.35, 0.0, 0.08), 2.5)
-		await get_tree().create_timer(4.0).timeout
-		Game.say("sub.hatch6")
-		_hurt_rate = 0.032
-
-
-func _basement_tick(_dt: float) -> void:
-	if Cfg.has_arg("auto_hatch") and not _hatch_busy and _given_up < 0.0 and t > 3.0 + _hatch_tries * 5.0:
-		player.global_position = Vector3(-1.4, 1.35, 0.1)
-		player.set_look(PI, 1.2)
-		_try_hatch()
-	var lamp := get_node_or_null("Bulb") as OmniLight3D
-	if lamp != null and _given_up < 0.0:
-		var fl := 1.4
-		if t > 40.0 and randf() < 0.05:
-			fl = randf_range(0.3, 1.0)
-		lamp.light_energy = fl
-	if randf() < _dt * 0.12:
-		Snd.play("footsteps_above", -10.0, randf_range(0.9, 1.1), "Amb")
-	# если герой так и не полез к люку — батарея всё равно садится
-	if _given_up < 0.0 and t > 150.0:
-		_given_up = t
-	if _given_up >= 0.0:
-		var gt := t - _given_up
-		if Game.main != null:
-			Game.main.osd.battery = 0.08
-			Game.main.osd.message = Loc.t("osd.battery")
-		if gt > 4.0 and gt < 12.0 and lamp != null:
-			lamp.light_energy = 1.4 if randf() > 0.25 else randf_range(0.0, 0.6)
-		if gt > 12.0 and lamp != null:
-			lamp.visible = false
-			(get_node("BulbMesh") as Node3D).visible = false
-		if _hurt_rate < 0.03:
-			_hurt_rate = 0.032
-
-
 # ======================================================================= ШОССЕ
 
 func _highway() -> void:
 	var e := _env_base(Color(0.01, 0.012, 0.025))
-	e.ambient_light_color = Color(0.06, 0.065, 0.09)
+	e.ambient_light_color = Color(0.1, 0.105, 0.14)
 	e.fog_enabled = true
 	e.fog_light_color = Color(0.02, 0.02, 0.035)
 	e.fog_density = 0.006
 	var moon := DirectionalLight3D.new()
 	moon.rotation = Vector3(-0.7, 2.2, 0)
 	moon.light_color = Color(0.55, 0.6, 0.85)
-	moon.light_energy = 0.25
+	moon.light_energy = 0.42
 	add_child(moon)
 	var ground := StandardMaterial3D.new()
 	ground.albedo_color = Color(0.32, 0.27, 0.2)
@@ -671,6 +466,17 @@ func _highway() -> void:
 		dash.material_override = line
 		dash.position = Vector3(0, 0.02, -600 + k * 10.0)
 		add_child(dash)
+	# сплошные белые линии по краям — дорога читается и в темноте
+	var edge_m := StandardMaterial3D.new()
+	edge_m.albedo_color = Color(0.85, 0.85, 0.8)
+	for ex in [-3.7, 3.7]:
+		var edge := MeshInstance3D.new()
+		var em := PlaneMesh.new()
+		em.size = Vector2(0.14, 1200.0)
+		edge.mesh = em
+		edge.material_override = edge_m
+		edge.position = Vector3(ex, 0.02, 0)
+		add_child(edge)
 	# звёзды
 	var star := StandardMaterial3D.new()
 	star.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -831,8 +637,9 @@ func _wall() -> void:
 	_box(self, Vector3(0.05, h, L), Vector3(w * 0.5 + 0.025, h * 0.5, 0), board, true)
 	_box(self, Vector3(w, h, 0.1), Vector3(0, h * 0.5, -L * 0.5 - 0.05), ins, true)
 	_box(self, Vector3(w, h, 0.1), Vector3(0, h * 0.5, L * 0.5 + 0.05), ins, true)
-	for k in 3:
-		_box(self, Vector3(w, 0.09, 0.04), Vector3(0, 0.5 + k * 0.8, -1.0 + k * 0.9), stud, false)
+	# поперечины каркаса: низко у пола и под потолком — не перед глазами
+	for bar in [Vector2(0.3, -1.0), Vector2(0.28, 0.35), Vector2(2.25, 1.05)]:
+		_box(self, Vector3(w, 0.09, 0.04), Vector3(0, bar.x, bar.y), stud, false)
 	# щель розетки: оттуда — тёплый свет соседской комнаты
 	var glow := StandardMaterial3D.new()
 	glow.emission_enabled = true
@@ -1385,7 +1192,6 @@ func _process(dt: float) -> void:
 	match kind:
 		"ocean": _ocean_tick(dt)
 		"sky": _sky_tick(dt)
-		"basement": _basement_tick(dt)
 		"highway": _highway_tick(dt)
 		"wall": _wall_tick(dt)
 		"space": _space_tick(dt)

@@ -43,6 +43,8 @@ func _ready() -> void:
 		player.set_look(float(Cfg.arg("yaw", "0")), float(Cfg.arg("pitch", "0")))
 	player.surface_fn = func(p: Vector3) -> String:
 		return "path" if _near_path(p) < 1.4 else "grass"
+	if Cfg.has_arg("near"):
+		Game._near_test(float(Cfg.arg("near")), self)
 	Snd.set_reverb(0.2, 0.05)
 	Snd.loop("park_amb", "park_ambience", 0.85, 2.0)
 	Snd.loop("park_wind", "wind_trees", 0.5, 2.0)
@@ -208,21 +210,34 @@ func _path() -> void:
 
 
 func _tufts(rng: RandomNumberGenerator) -> void:
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	var q := QuadMesh.new()
-	q.size = Vector2(0.45, 0.3)
-	q.center_offset = Vector3(0, 0.15, 0)
+	# кустик — несколько тонких травинок-треугольников (без прозрачной текстуры: издалека не превращается в кляксы);
+	# нормали смотрят вверх, поэтому трава освещена как газон под ней
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var trng := RandomNumberGenerator.new()
+	trng.seed = 1407
+	for k in 9:
+		var a := trng.randf() * TAU
+		var base := Vector3(cos(a), 0, sin(a)) * trng.randf_range(0.0, 0.09)
+		var hgt := trng.randf_range(0.16, 0.34)
+		var lean := Vector3(cos(a), 0, sin(a)) * trng.randf_range(0.03, 0.12)
+		var side := Vector3(-sin(a + 1.3), 0, cos(a + 1.3)) * trng.randf_range(0.012, 0.022)
+		var dark := Color(0.1, 0.17, 0.05).lerp(Color(0.14, 0.19, 0.06), trng.randf())
+		var tip := Color(0.22, 0.32, 0.1).lerp(Color(0.3, 0.33, 0.13), trng.randf())
+		for v in [[base - side, dark], [base + side, dark], [base + lean + Vector3(0, hgt, 0), tip]]:
+			st.set_color(v[1])
+			st.set_normal(Vector3.UP)
+			st.add_vertex(v[0])
 	var tm := StandardMaterial3D.new()
-	tm.albedo_texture = Mats.tex("grass_tuft")
-	tm.albedo_color = Color(1.0, 1.0, 1.0)
-	tm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-	tm.alpha_scissor_threshold = 0.5
+	tm.vertex_color_use_as_albedo = true
 	tm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	tm.roughness = 1.0
-	q.material = tm
-	mm.mesh = q
-	mm.instance_count = 2600
+	var mesh := st.commit()
+	mesh.surface_set_material(0, tm)
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = mesh
+	mm.instance_count = 4200
 	for i in mm.instance_count:
 		var p := Vector3(rng.randf_range(-55, 55), 0, rng.randf_range(-55, 55))
 		while _near_path(p) < 1.9:
@@ -563,6 +578,10 @@ func _to_std(n: Node) -> void:
 				if tm != null and float(tm) > 0.3 and tx is Texture2D:
 					m.albedo_texture = tx
 				var ac: Variant = sm.get_shader_parameter("alpha_cut")
+				if tx is Texture2D and tx == Mats.tex("leaves"):
+					# крона сплошная, без дыр: светлые пятна текстуры — светлая листва, тёмные — тень
+					m.albedo_color = Color(0.52, 0.68, 0.34)
+					ac = null
 				if ac != null and float(ac) > 0.0:
 					m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 					m.alpha_scissor_threshold = float(ac)

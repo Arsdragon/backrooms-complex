@@ -656,8 +656,9 @@ func _bot(dt: float) -> void:
 		for e in entities:
 			if e.get("hunting") != null and bool(e.get("active")):
 				st_n += 1
-		print("BOT t=%.0f fps=%d layer=%d cell=%s chunks=%d pending=%d lf=%s d=%.1f null=%.1f gain=%.2f st=%d/%d" % [Game.run_time, Engine.get_frames_per_second(),
-			cur, str(cell_of(player.global_position)), chunks.size(), pending.size(), lf_state, lf_d, near_null, gain, st_n, entities.size()])
+		print("BOT t=%.0f fps=%d layer=%d cell=%s chunks=%d pending=%d lf=%s d=%.1f null=%.1f gain=%.2f st=%d/%d mem=%.0f nodes=%d y=%.1f hurt=%.2f" % [Game.run_time, Engine.get_frames_per_second(),
+			cur, str(cell_of(player.global_position)), chunks.size(), pending.size(), lf_state, lf_d, near_null, gain, st_n, entities.size(),
+			Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0, int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)), player.global_position.y, hurt])
 
 
 func _physics_process(_dt: float) -> void:

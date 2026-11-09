@@ -220,6 +220,7 @@ static func spawn_all(cx: Node3D, parent: Node3D, decos: Array, layer: int) -> v
 		if n == null:
 			continue
 		parent.add_child(n)
+		n.set_meta("k", dd.get("k", ""))
 		n.position = dd.p
 		if not n.has_meta("keep_rot"):
 			n.rotation.y = float(dd.get("r", 0.0))
@@ -370,7 +371,7 @@ static func obj(what: String, wrong: String, rng: RandomNumberGenerator, d: Dict
 
 
 static func _bench(p: Node3D) -> void:
-	if model(p, "modular_street_seating", Vector3.ZERO, 0.0, Vector3(0.45, 1.0, 1.0)) != null:
+	if model(p, "modular_street_seating", Vector3.ZERO, 0.0, Vector3(0.8, 1.0, 1.0)) != null:
 		return
 	var w := m_wood()
 	var ir := m_iron()
@@ -610,10 +611,18 @@ static func _shelf(p: Node3D, rng: RandomNumberGenerator) -> void:
 
 
 static func _sign_park(p: Node3D) -> void:
-	box(p, Vector3(0.08, 1.4, 0.08), Vector3(0, 0.7, 0), Mats.col(Color(0.35, 0.25, 0.15), "wood", 0.8))
-	box(p, Vector3(0.9, 0.55, 0.04), Vector3(0, 1.5, 0), Mats.col(Color(0.15, 0.32, 0.2), "wood", 0.4))
-	var lb := label(Loc.t("sign.park"), font_sign(), 0.0045, Color(0.9, 0.88, 0.8))
-	lb.position = Vector3(0, 1.5, 0.025)
+	var bw := 1.2
+	var bh := 0.6
+	for sx in [-bw * 0.42, bw * 0.42]:
+		box(p, Vector3(0.08, 1.55, 0.08), Vector3(sx, 0.78, -0.05), Mats.col(Color(0.35, 0.25, 0.15), "wood", 0.8))
+	box(p, Vector3(bw, bh, 0.05), Vector3(0, 1.5, 0), Mats.col(Color(0.15, 0.32, 0.2), "wood", 0.4))
+	# надпись подгоняем под табличку: шрифт системный, ширина строки зависит от языка
+	var txt := Loc.t("sign.park")
+	var f := font_sign()
+	var tsz := f.get_multiline_string_size(txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 64)
+	var px := minf((bw - 0.16) / maxf(tsz.x, 1.0), (bh - 0.14) / maxf(tsz.y, 1.0))
+	var lb := label(txt, f, px, Color(0.9, 0.88, 0.8))
+	lb.position = Vector3(0, 1.5, 0.03)
 	p.add_child(lb)
 
 
@@ -1261,6 +1270,10 @@ static func red_city(d: Dictionary, rng: RandomNumberGenerator) -> Node3D:
 		var bw := rng.randf_range(5.0, 12.0)
 		var bh := rng.randf_range(6.0, 30.0)
 		var bd := rng.randf_range(5.0, 12.0)
+		# высокие дома — только над пустотой; дальние — ниже пола слоя, иначе крыши торчат в соседних комнатах
+		var inside := absf(bx) + bw * 0.5 < w * 0.5 - 0.6 and bz - bd * 0.5 > -dep * 0.5 + 0.6 and bz + bd * 0.5 < dep * 0.5 - 3.0
+		if not inside:
+			bh = rng.randf_range(4.0, 12.6)
 		var b := box(n, Vector3(bw, bh, bd), Vector3(bx, base_y + bh * 0.5, bz), win)
 		b.material_override = win
 	var tree := Mats.col(Color(0.01, 0.01, 0.01), "leaves", 0.0, {"fog_mul": 0.15})
