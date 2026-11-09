@@ -23,10 +23,18 @@ Found-footage хоррор по лору Backrooms Кейна Парсонса (
   в парке `--pos=x,y,z --yaw --pitch` (углы в радианах).
 - `--tour=<папка> [--only=подстрока]` — обойти все `room_*` текущего слоя и снять по два кадра; `--crouch` — присесть;
   `--gen_prof` — время этапов генерации.
+- `--world=base|adventure|survival|polygon` — режим мира; `--menu=worlds|polygon|rooms` — открыть экран меню;
+  `--poly=park|l0|l1|place:<ключ>[:1]|ending:<вид>|death|gallery:<набор>` — запуск как из полигона;
+  `--fc_test` — проверка мыши и свободной камеры (G) через настоящий ввод.
 - `tools/dev/aabb.gd` — габариты моделей (`--headless --script`).
 
 ## Архитектура (src/)
 - `main.gd` — 3D в SubViewport 480 строк → TextureRect с `shaders/vhs.gdshader`; OSD камеры (`render/osd.gd`) внутри кадра.
+  SubViewport без контейнера сам ввод не получает: `main._unhandled_input` пересылает события через `vp.push_input`.
+- Режимы мира: `Cfg.world` (сохраняется) → `Game.mode`; правила — `Game.monsters()/stamina_on()/speed_mode()/freecam_ok()`.
+  Базовый: без выносливости; Приключение: ×1,5, без монстров, G — `player/freecam.gd`; Выживание: выносливость, Сущность
+  раньше/чаще, две плачущие копии; Полигон: меню в `ui/menus.gd`, запуски `Game.poly_*`, мир полигона с сидом 1990
+  строится один раз. Флаги запуска полигона — `Cfg.flags` (те же ключи, что у аргументов: god, place, set, lf_now…).
 - autoload: `Cfg` (настройки, ввод, аргументы), `Loc` + `texts.gd` (ключ → [ru, en]; sign./osd. — англ. в «смешанном»),
   `Snd` (шины, варианты `_N`, петли), `Game` (поток игры, генерация мира в WorkerThreadPool во время парка).
 - `world/layer_data.gd` — тор 384×384 клеток по 2.4 м, стены на рёбрах; `worldgen.gd` — два слоя, особые комнаты, кабели, декор.

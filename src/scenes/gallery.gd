@@ -6,6 +6,7 @@ const LifeformS := preload("res://src/world/lifeform.gd")
 
 var player = null
 var cam: Camera3D
+var fcam: FreeCam = null       # в полигоне по галерее можно летать
 
 
 func _ready() -> void:
@@ -63,27 +64,35 @@ func _ready() -> void:
 		for d in DirAccess.get_directories_at("res://models"):
 			ids.append(String(d))
 		ids.sort()
-		var part := int(set_name.substr(6)) if set_name.length() > 6 else 0
-		ids = ids.slice(part * 11, part * 11 + 11)
-		var mx := -float(ids.size() - 1) * 1.1
-		for id in ids:
+		# «models» без номера — все модели сеткой по 16 в ряд (для полигона), иначе — часть из 11
+		var all := set_name == "models"
+		var per := 16 if all else 11
+		if not all:
+			var part := int(set_name.substr(6)) if set_name.length() > 6 else 0
+			ids = ids.slice(part * 11, part * 11 + 11)
+		for i in ids.size():
+			var id: String = ids[i]
 			var m := Models.make(id, true)
 			if m == null:
 				continue
+			var row := i / per
+			var n_in := mini(per, ids.size() - row * per)
+			var mx := -float(n_in - 1) * 1.1 + float(i % per) * 2.2
+			var mz := float(row) * 3.4
 			add_child(m)
-			m.position = Vector3(mx, 0, 0)
+			m.position = Vector3(mx, 0, mz)
 			Props.set_light(m, Color(0.45, 0.0, 0.0, 0.0))
 			var lb := Props.label(id, Props.font_sign(), 0.0022, Color(1, 1, 1))
-			lb.position = Vector3(mx, 0.05, 0.9)
+			lb.position = Vector3(mx, 0.05, mz + 0.9)
 			lb.rotation.x = -0.6
 			add_child(lb)
-			mx += 2.2
 		cam = Camera3D.new()
 		add_child(cam)
 		cam.fov = 60.0
-		cam.position = Vector3(0, 2.2, 13.0)
-		cam.look_at(Vector3(0, 0.8, 0))
+		cam.position = Vector3(0, 2.2, 13.0) if not all else Vector3(0, 2.0, -0.8)
+		cam.look_at(Vector3(0, 0.8, 0) if not all else Vector3(0, 0.6, 6.0))
 		cam.current = true
+		_fly()
 		if Game.main != null:
 			Game.main.osd.shown = false
 			Game.main.set_fade(Color(0, 0, 0, 0))
@@ -121,13 +130,21 @@ func _ready() -> void:
 			var lf := LifeformS.new()
 			add_child(lf)
 			lf._build()
-			lf.position = Vector3(-4.0 + k * 4.0, 0, 0)
+			lf.position = Vector3(-6.0 + k * 3.6, 0, 0)
 			lf.cur_speed = [0.0, 1.3, 5.0][k]
 			lf.state_t = 1.0
 			lf._animate(0.3 + k * 0.2)
 			LifeformS._apply_light(lf, Vector4(0.9, 0, 0, 0))
 			for eye in lf.eyes:
 				(eye as Node3D).visible = true
+		# плачущая копия нижнего слоя
+		var st := Human.make("civ_c", 913, true)
+		add_child(st)
+		st.tune({"mold": 0.9, "pale": 0.7, "smear": 2.0, "wet": 0.6})
+		st.pose("stand")
+		st.scale = Vector3(1.0, 1.08, 1.0)
+		st.position = Vector3(4.6, 0, 0)
+		Props.set_light(st, Color(0.45, 0.0, 0.0, 0.0))
 	cam = Camera3D.new()
 	add_child(cam)
 	cam.fov = 60.0
@@ -137,6 +154,22 @@ func _ready() -> void:
 	cam.position = Vector3(lx + float(Cfg.arg("ox", "0")), float(Cfg.arg("cy", "1.6")), dist)
 	cam.look_at(Vector3(lx, float(Cfg.arg("ly", "1.0")), 0))
 	cam.current = true
+	# в полигоне — от начала ряда по диагонали, дальше пролететь вдоль
+	if Game.mode == "polygon" and items.size() > 3:
+		var x0 := -float(items.size() - 1) * 1.6
+		cam.position = Vector3(x0 - 2.0, 1.75, 4.2)
+		cam.look_at(Vector3(x0 + 5.0, 1.0, 0.0))
+	_fly()
 	if Game.main != null:
 		Game.main.osd.shown = false
 		Game.main.set_fade(Color(0, 0, 0, 0))
+
+
+## В полигоне камера галереи свободная: WASD, мышь, Пробел / Ctrl, Shift
+func _fly() -> void:
+	if Game.mode != "polygon":
+		return
+	fcam = FreeCam.new()
+	add_child(fcam)
+	fcam.copy_from(cam.global_transform)
+	fcam.current = true

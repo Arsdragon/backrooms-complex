@@ -25,6 +25,36 @@ var paused := false
 var run_time := 0.0
 var _menu_layers: Array = []
 var _menu_tmp: Array = []
+var mode := "base"             # мир текущей игры: base | adventure | survival | polygon
+var _poly_layers: Array = []   # мир полигона (один и тот же сид, строится один раз)
+var _poly_tmp: Array = []
+const POLY_SEED := 1990
+
+
+# ------------------------------------------------------------ правила мира
+
+## Есть ли монстры (в «Приключении» — нет)
+func monsters() -> bool:
+	return mode != "adventure" and not Cfg.has_arg("no_monsters")
+
+
+## Выносливость: только «Выживание» (и флажок полигона)
+func stamina_on() -> bool:
+	return mode == "survival" or Cfg.has_arg("stamina")
+
+
+## Множитель скорости героя: «Приключение» — в полтора раза быстрее
+func speed_mode() -> float:
+	return 1.5 if (mode == "adventure" or Cfg.has_arg("fast")) else 1.0
+
+
+## Свободная камера по G
+func freecam_ok() -> bool:
+	return mode == "adventure" or mode == "polygon" or Cfg.has_arg("freecam")
+
+
+func survival() -> bool:
+	return mode == "survival"
 
 
 func _ready() -> void:
@@ -37,6 +67,8 @@ func boot() -> void:
 	main.ui.add_child(menus)
 	note_view = NoteView.new()
 	main.ui.add_child(note_view)
+	if Cfg.has_arg("world"):
+		mode = Cfg.arg("world")
 	var sc := Cfg.arg("scene", "")
 	if sc == "complex" or sc == "lower":
 		seed = int(Cfg.arg("seed", "1990"))
@@ -48,6 +80,9 @@ func boot() -> void:
 		_start_gen()
 		start_park()
 	elif sc == "gallery":
+		if mode == "polygon":
+			state = "gallery"
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		main.set_scene(load("res://src/scenes/gallery.gd").new())
 	elif sc == "ending":
 		seed = 1
@@ -103,7 +138,10 @@ func go_menu() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	if _menu_layers.is_empty():
 		# фон меню строится в потоке, меню доступно сразу
-		menus.show_main()
+		if mode == "polygon":
+			menus.show_polygon()
+		else:
+			menus.show_main()
 		var task := WorkerThreadPool.add_task(func() -> void: _menu_tmp = [WorldGenS.layer0(4242)])
 		while not WorkerThreadPool.is_task_completed(task):
 			await get_tree().process_frame
@@ -116,12 +154,18 @@ func go_menu() -> void:
 	complex = null
 	var L: LayerData = _menu_layers[0]
 	cx.setup(_menu_layers, 0, L.places["spawn"] + Vector3(0, 0, 0), 0.6, true)
-	menus.show_main()
+	if mode == "polygon":
+		menus.show_polygon()
+	else:
+		menus.show_main()
 	main.fade_to(Color(0, 0, 0, 0), 1.5)
+	_debug_menu()
 	Snd.loop("menu_hum", "hum_fluor", 0.5, 2.0)
 
 
-func new_game() -> void:
+func new_game(world := "base") -> void:
+	mode = world
+	Cfg.flags = {}
 	state = "intro"
 	menus.hide_all()
 	seed = randi() % 1000000
@@ -190,6 +234,8 @@ func start_complex(lower := false, from_fall := false) -> void:
 	if Cfg.has_arg("place"):
 		var Lp: LayerData = layers[start_layer]
 		var pv: Variant = Lp.places.get(Cfg.arg("place"))
+		if pv is Array and not (pv as Array).is_empty():
+			pv = (pv as Array)[0]
 		if pv is Vector3:
 			sp = pv
 		elif pv is Vector2i:
@@ -209,22 +255,55 @@ func start_complex(lower := false, from_fall := false) -> void:
 	main.osd.shown = true
 	main.osd.date_key = "osd.date_park"
 	main.osd.date_reset = true
-	# монстры
-	var lf := LifeformS.new()
-	cx.add_child(lf)
-	lf.setup(cx)
-	cx.entities.append(lf)
-	cx.listeners.append(lf)
-	if layers.size() > 1:
-		var st := StalkerS.new()
-		cx.add_child(st)
-		st.setup(cx)
-		cx.entities.append(st)
-		cx.listeners.append(st)
+	# монстры: в «Приключении» их нет, в «Выживании» на нижнем слое две плачущие копии
+	if monsters():
+		var lf := LifeformS.new()
+		cx.add_child(lf)
+		lf.setup(cx)
+		cx.entities.append(lf)
+		cx.listeners.append(lf)
+		if layers.size() > 1:
+			for k in (2 if survival() else 1):
+				var st := StalkerS.new()
+				st.extra = k > 0
+				cx.add_child(st)
+				st.setup(cx)
+				cx.entities.append(st)
+				cx.listeners.append(st)
 	if from_fall:
 		cx.landing_intro()
 	else:
 		main.fade_to(Color(0, 0, 0, 0), 0.6)
+	if Cfg.has_arg("fc_test"):
+		_fc_test()
+
+
+## Отладка: --fc_test — через 2 с нажать G и 2,5 с лететь вперёд и вверх (проверка свободной камеры)
+func _fc_test() -> void:
+	await get_tree().create_timer(2.0).timeout
+	if complex != null and is_instance_valid(complex):
+		var p0: Player = complex.get("player")
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		var mm := InputEventMouseMotion.new()
+		mm.relative = Vector2(200, 0)
+		Input.parse_input_event(mm)
+		await get_tree().create_timer(0.3).timeout
+		print("FC yaw after mouse = ", p0.yaw)
+	var ev := InputEventAction.new()
+	ev.action = "freecam"
+	ev.pressed = true
+	Input.parse_input_event(ev)
+	await get_tree().create_timer(0.2).timeout
+	Input.action_press("move_f")
+	Input.action_press("fly_up")
+	Input.action_press("run")
+	await get_tree().create_timer(2.5).timeout
+	Input.action_release("move_f")
+	Input.action_release("fly_up")
+	Input.action_release("run")
+	if complex != null and is_instance_valid(complex):
+		var pl: Player = complex.get("player")
+		print("FC body=", pl.global_position, " cam=", pl.view_pos(), " freecam=", pl.freecam != null)
 
 
 func _process(dt: float) -> void:
@@ -257,7 +336,7 @@ func _unhandled_input(e: InputEvent) -> void:
 			note_view.close()
 			get_viewport().set_input_as_handled()
 			return
-		if state in ["park", "complex"]:
+		if state in ["park", "complex"] or (mode == "polygon" and state in ["ending", "gallery"]):
 			set_paused(not paused)
 			get_viewport().set_input_as_handled()
 		return
@@ -286,7 +365,7 @@ func set_paused(v: bool) -> void:
 	else:
 		menus.hide_all()
 		Snd.muffle(0.0)
-		if state in ["park", "complex"]:
+		if state in ["park", "complex", "ending", "gallery"]:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
@@ -373,3 +452,120 @@ func show_card(k: String) -> void:
 	main.fade_to(Color(0, 0, 0, 1), 0.6)
 	await get_tree().create_timer(0.7).timeout
 	go_menu()
+
+
+# ------------------------------------------------------------ полигон
+
+var _debug_done := false
+
+
+## Отладка: --menu=worlds|polygon|rooms — открыть экран меню; --poly=<действие> — запуск из полигона:
+## park | l0 | l1 | place:<ключ>[:1] | ending:<вид> | death | gallery:<набор>
+func _debug_menu() -> void:
+	if _debug_done:
+		return
+	_debug_done = true
+	match Cfg.arg("menu", ""):
+		"worlds":
+			menus.show_worlds()
+		"polygon":
+			mode = "polygon"
+			menus.show_polygon()
+		"rooms":
+			mode = "polygon"
+			menus.show_rooms()
+	if not Cfg.has_arg("poly"):
+		return
+	var a := Cfg.arg("poly").split(":")
+	await get_tree().create_timer(0.5).timeout
+	match a[0]:
+		"park":
+			poly_park()
+		"l0":
+			poly_complex(false)
+		"l1":
+			poly_complex(true)
+		"place":
+			poly_complex(a.size() > 2 and a[2] == "1", a[1])
+		"ending":
+			poly_ending(a[1])
+		"death":
+			poly_death()
+		"gallery":
+			poly_gallery(a[1])
+
+## Мир полигона: строится в фоне один раз, потом переиспользуется
+func _poly_world() -> void:
+	if not _poly_layers.is_empty():
+		return
+	menus.show_intro_static(Loc.t("poly.loading"))
+	var task := WorkerThreadPool.add_task(func() -> void: _poly_tmp = WorldGenS.generate(POLY_SEED))
+	while not WorkerThreadPool.is_task_completed(task):
+		await get_tree().process_frame
+	WorkerThreadPool.wait_for_task_completion(task)
+	_poly_layers = _poly_tmp
+
+
+## Общая подготовка запуска из полигона: флаги-переключатели + свои параметры
+func _poly_begin(extra: Dictionary) -> void:
+	mode = "polygon"
+	state = "poly_load"
+	menus.hide_all()
+	Snd.stop_loop("menu_hum", 0.4)
+	Cfg.flags = menus.poly_flags()
+	for k in extra.keys():
+		Cfg.flags[k] = extra[k]
+	var tw: Tween = main.fade_to(Color(0, 0, 0, 1), 0.4)
+	await tw.finished
+	main.set_scene(null)
+	main.subs.clear()
+
+
+func poly_complex(lower: bool, place := "", extra := {}) -> void:
+	var ex := extra.duplicate()
+	if place != "":
+		ex["place"] = place
+	await _poly_begin(ex)
+	await _poly_world()
+	menus.hide_all()
+	seed = POLY_SEED
+	layers = _poly_layers
+	run_time = 0.0
+	main.osd.battery = 1.0
+	start_complex(lower)
+
+
+func poly_park() -> void:
+	await _poly_begin({})
+	await _poly_world()
+	menus.hide_all()
+	seed = POLY_SEED
+	_gen_task = -1
+	_gen_result = _poly_layers
+	start_park()
+
+
+func poly_ending(k: String) -> void:
+	await _poly_begin({})
+	start_ending(k)
+
+
+func poly_death() -> void:
+	await _poly_begin({})
+	state = "complex"
+	die()
+
+
+func poly_gallery(set_name: String) -> void:
+	await _poly_begin({"set": set_name})
+	state = "gallery"
+	main.osd.shown = false
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	main.set_scene(load("res://src/scenes/gallery.gd").new())
+
+
+## Выйти из полигона в главное меню
+func leave_polygon() -> void:
+	mode = "base"
+	Cfg.flags = {}
+	menus.show_main()

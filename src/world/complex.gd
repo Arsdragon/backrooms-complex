@@ -93,7 +93,7 @@ func setup(layer_list: Array, start_layer: int, start_pos: Vector3, start_yaw: f
 func _focus_pos() -> Vector3:
 	if demo:
 		return demo_cam.global_position
-	return player.global_position
+	return player.view_pos()
 
 
 func layer() -> LayerData:
@@ -534,14 +534,15 @@ func enter_threshold() -> void:
 	if ended:
 		return
 	ended = true
-	Game.ending("async")
+	# вход срабатывает в физическом колбэке — сцену меняем после него
+	Game.ending.call_deferred("async")
 
 
 func enter_null(_id: String) -> void:
 	if ended:
 		return
 	ended = true
-	Game.ending("null")
+	Game.ending.call_deferred("null")
 
 
 var _bot_path: Array = []
@@ -587,8 +588,12 @@ func _bot(dt: float) -> void:
 			if e.has_method("interference") and e.get("state") != null:
 				lf_state = str(e.get("state"))
 				lf_d = (e as Node3D).global_position.distance_to(player.global_position)
-		print("BOT t=%.0f fps=%d layer=%d cell=%s chunks=%d pending=%d lf=%s d=%.1f null=%.1f gain=%.2f" % [Game.run_time, Engine.get_frames_per_second(),
-			cur, str(cell_of(player.global_position)), chunks.size(), pending.size(), lf_state, lf_d, near_null, gain])
+		var st_n := 0
+		for e in entities:
+			if e.get("hunting") != null and bool(e.get("active")):
+				st_n += 1
+		print("BOT t=%.0f fps=%d layer=%d cell=%s chunks=%d pending=%d lf=%s d=%.1f null=%.1f gain=%.2f st=%d/%d" % [Game.run_time, Engine.get_frames_per_second(),
+			cur, str(cell_of(player.global_position)), chunks.size(), pending.size(), lf_state, lf_d, near_null, gain, st_n, entities.size()])
 
 
 func _physics_process(_dt: float) -> void:

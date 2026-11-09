@@ -45,6 +45,7 @@ var speed_mul := 1.0
 var bot := false               # автотест: ввод задаёт бот
 var bot_input := Vector2.ZERO
 var bot_run := false
+var freecam: FreeCam = null    # свободная камера (G в «Приключении» и полигоне)
 
 
 func _ready() -> void:
@@ -78,18 +79,43 @@ func set_look(y: float, p: float) -> void:
 
 
 func _unhandled_input(e: InputEvent) -> void:
-	if e is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+	if e is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and freecam == null:
 		_mouse += (e as InputEventMouseMotion).relative
+	if e.is_action_pressed("freecam") and Game.freecam_ok() and (freecam != null or not frozen):
+		toggle_freecam()
+		get_viewport().set_input_as_handled()
+
+
+func toggle_freecam() -> void:
+	if freecam != null:
+		freecam.queue_free()
+		freecam = null
+		cam.current = true
+		Snd.play("ui_move", -10.0)
+		return
+	freecam = FreeCam.new()
+	get_parent().add_child(freecam)
+	freecam.copy_from(cam.global_transform)
+	freecam.current = true
+	Snd.play("ui_click", -10.0)
+
+
+## Откуда сейчас смотрит камера (для подгрузки мира)
+func view_pos() -> Vector3:
+	if freecam != null and is_instance_valid(freecam):
+		return freecam.global_position
+	return global_position
 
 
 func _physics_process(dt: float) -> void:
 	var inp := Vector2.ZERO
-	if not frozen:
+	var fc := freecam != null
+	if not frozen and not fc:
 		inp = Input.get_vector("move_l", "move_r", "move_f", "move_b")
 		if bot:
 			inp = bot_input
 	# взгляд
-	if not frozen and not look_locked:
+	if not frozen and not look_locked and not fc:
 		var s := 0.0022 * Cfg.sens
 		yaw -= _mouse.x * s
 		pitch -= _mouse.y * s * (-1.0 if Cfg.invert_y else 1.0)
@@ -98,7 +124,7 @@ func _physics_process(dt: float) -> void:
 	rotation.y = yaw
 	head.rotation.x = pitch
 
-	var want_crouch := not frozen and (Input.is_action_pressed("crouch") or Cfg.has_arg("crouch"))
+	var want_crouch := not frozen and ((Input.is_action_pressed("crouch") and not fc) or Cfg.has_arg("crouch") or (fc and crouching))
 	if crouching and not want_crouch:
 		# встать можно, только если над головой есть место
 		var q := PhysicsRayQueryParameters3D.create(global_position + Vector3(0, 0.3, 0), global_position + Vector3(0, 1.85, 0), 1)
@@ -111,17 +137,23 @@ func _physics_process(dt: float) -> void:
 		exhausted = false
 	running = want_run and not exhausted and is_on_floor()
 	var spd := WALK
+	# выносливость есть только в «Выживании» (и в полигоне по флажку)
+	var stam_on := Game.stamina_on()
 	if running:
 		spd = RUN
-		stamina -= dt / 7.5
-		if stamina <= 0.0:
-			stamina = 0.0
-			exhausted = true
+		if stam_on:
+			stamina -= dt / 7.5
+			if stamina <= 0.0:
+				stamina = 0.0
+				exhausted = true
 	else:
 		stamina = minf(1.0, stamina + dt / (9.0 if inp.length() > 0.1 else 6.0))
+	if not stam_on:
+		stamina = 1.0
+		exhausted = false
 	if crouching:
 		spd = CROUCH
-	spd *= speed_mul
+	spd *= speed_mul * Game.speed_mode()
 	if _land_lock > 0.0:
 		_land_lock -= dt
 		spd *= 0.35
@@ -233,7 +265,7 @@ func _breathing(dt: float) -> void:
 func _interact_scan() -> void:
 	interact_hint = ""
 	_cur_interact = null
-	if frozen:
+	if frozen or freecam != null:
 		return
 	var space := get_world_3d().direct_space_state
 	var from := cam.global_position

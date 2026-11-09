@@ -19,9 +19,14 @@ var fullscreen := true
 var head_bob := true
 var osd := true            # надписи видеокамеры (REC, дата)
 var subtitles := true
+var world := "base"        # выбор мира: "base" | "adventure" | "survival" | "polygon"
+
+const WORLDS := ["base", "adventure", "survival", "polygon"]
 
 ## Отладочные аргументы командной строки после «--»: --key=value
 var args := {}
+## Флаги текущего запуска из полигона (те же ключи, что у аргументов: god, place, set, lf_now…)
+var flags := {}
 
 
 func _ready() -> void:
@@ -36,11 +41,11 @@ func _ready() -> void:
 
 
 func arg(key: String, def := "") -> String:
-	return String(args.get(key, def))
+	return String(flags.get(key, args.get(key, def)))
 
 
 func has_arg(key: String) -> bool:
-	return args.has(key)
+	return flags.has(key) or args.has(key)
 
 
 func testing() -> bool:
@@ -57,6 +62,7 @@ func load_cfg() -> void:
 	fov = float(c.get_value("game", "fov", fov))
 	head_bob = bool(c.get_value("game", "head_bob", head_bob))
 	subtitles = bool(c.get_value("game", "subtitles", subtitles))
+	world = String(c.get_value("game", "world", world))
 	vol_master = float(c.get_value("audio", "master", vol_master))
 	vol_sfx = float(c.get_value("audio", "sfx", vol_sfx))
 	vol_amb = float(c.get_value("audio", "amb", vol_amb))
@@ -65,6 +71,8 @@ func load_cfg() -> void:
 	res = int(c.get_value("video", "res", res))
 	fullscreen = bool(c.get_value("video", "fullscreen", fullscreen))
 	osd = bool(c.get_value("video", "osd", osd))
+	if not world in WORLDS:
+		world = "base"
 	if not lang in ["ru", "en", "mixed"]:
 		lang = "mixed"
 	if not res in [480, 600, 720]:
@@ -81,6 +89,7 @@ func save_cfg() -> void:
 	c.set_value("game", "fov", fov)
 	c.set_value("game", "head_bob", head_bob)
 	c.set_value("game", "subtitles", subtitles)
+	c.set_value("game", "world", world)
 	c.set_value("audio", "master", vol_master)
 	c.set_value("audio", "sfx", vol_sfx)
 	c.set_value("audio", "amb", vol_amb)
@@ -126,6 +135,8 @@ func _setup_input() -> void:
 	_key("crouch", [KEY_CTRL, KEY_C])
 	_key("use", [KEY_E, KEY_F])
 	_key("pause", [KEY_ESCAPE, KEY_P])
+	_key("freecam", [KEY_G])
+	_key("fly_up", [KEY_SPACE])
 	var m := InputEventMouseButton.new()
 	m.button_index = MOUSE_BUTTON_LEFT
 	InputMap.action_add_event("use", m)

@@ -12,6 +12,13 @@ var controls: Label
 var credit: Label
 var _settings_from := "main"
 var _rows := []
+var world_box: Control
+var world_desc: Label
+var poly_box: Control
+var rooms_box: Control
+var poly_state := {"god": true, "nomon": false, "lfnow": false, "chase": false, "fast": false, "stamina": false}
+
+const WORLD_KEYS := {"base": "ui.w_base", "adventure": "ui.w_adv", "survival": "ui.w_surv", "polygon": "ui.w_poly"}
 
 
 func _ready() -> void:
@@ -40,14 +47,14 @@ func _lbl(text: String, size: int, col := Color(0.93, 0.93, 0.88), bold := false
 	return l
 
 
-func _btn(key: String, cb: Callable) -> Button:
+func _btn(key: String, cb: Callable, size := 30) -> Button:
 	var b := Button.new()
 	b.set_meta("key", key)
 	b.text = "  " + Loc.t(key)
 	b.flat = true
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.add_theme_font_override("font", font_b)
-	b.add_theme_font_size_override("font_size", 30)
+	b.add_theme_font_size_override("font_size", size)
 	b.add_theme_color_override("font_color", Color(0.85, 0.85, 0.8))
 	b.add_theme_color_override("font_hover_color", Color(0.55, 0.95, 1.0))
 	b.add_theme_color_override("font_focus_color", Color(0.55, 0.95, 1.0))
@@ -86,7 +93,7 @@ func _build() -> void:
 	main_box.position = Vector2(100, 380)
 	main_box.add_theme_constant_override("separation", 6)
 	add_child(main_box)
-	main_box.add_child(_btn("ui.play", func() -> void: Game.new_game()))
+	main_box.add_child(_btn("ui.play", func() -> void: show_worlds()))
 	main_box.add_child(_btn("ui.settings", func() -> void: show_settings("main")))
 	main_box.add_child(_btn("ui.quit", func() -> void: get_tree().quit()))
 	pause_box = VBoxContainer.new()
@@ -102,6 +109,9 @@ func _build() -> void:
 		Game.set_paused(false)
 		Game.go_menu()))
 	_build_settings()
+	_build_worlds()
+	_build_polygon()
+	_build_rooms()
 	intro = _lbl("", 34, Color(0.92, 0.92, 0.88))
 	intro.set_anchors_preset(Control.PRESET_FULL_RECT)
 	intro.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -121,6 +131,208 @@ func _build() -> void:
 	credit.offset_bottom = -6
 	credit.offset_right = -16
 
+
+# ------------------------------------------------------------ выбор мира
+
+func _build_worlds() -> void:
+	world_box = Control.new()
+	world_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(world_box)
+	var t := _lbl(Loc.t("ui.world"), 44, Color(0.95, 0.92, 0.7), true)
+	t.set_meta("key", "ui.world")
+	t.position = Vector2(100, 130)
+	world_box.add_child(t)
+	var col := VBoxContainer.new()
+	col.position = Vector2(100, 230)
+	col.add_theme_constant_override("separation", 8)
+	world_box.add_child(col)
+	world_desc = _lbl("", 23, Color(0.9, 0.9, 0.84))
+	world_desc.position = Vector2(560, 246)
+	world_desc.size = Vector2(620, 300)
+	world_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	world_box.add_child(world_desc)
+	for w in Cfg.WORLDS:
+		var wk: String = w
+		var b := _btn(WORLD_KEYS[wk], func() -> void: _pick_world(wk))
+		b.set_meta("world", wk)
+		b.focus_entered.connect(func() -> void: world_desc.text = Loc.t(String(WORLD_KEYS[wk]) + "_d"))
+		col.add_child(b)
+	var back := _btn("ui.back", func() -> void: show_main())
+	col.add_child(back)
+
+
+func _pick_world(w: String) -> void:
+	Cfg.world = w
+	Cfg.save_cfg()
+	if w == "polygon":
+		Game.mode = "polygon"
+		show_polygon()
+	else:
+		Game.new_game(w)
+
+
+func show_worlds() -> void:
+	hide_all()
+	visible = true
+	world_box.visible = true
+	credit.visible = true
+	(get_node("Dim") as ColorRect).visible = true
+	(get_node("Dim") as ColorRect).color = Color(0, 0, 0, 0.6)
+	_relabel()
+	var col := world_box.get_child(1) as VBoxContainer
+	for b in col.get_children():
+		if b.has_meta("world") and String(b.get_meta("world")) == Cfg.world:
+			(b as Button).grab_focus()
+	world_desc.text = Loc.t(String(WORLD_KEYS[Cfg.world]) + "_d")
+
+
+# ------------------------------------------------------------ полигон
+
+func _poly_col(parent: Control, x: float, head: String) -> VBoxContainer:
+	var v := VBoxContainer.new()
+	v.position = Vector2(x, 128)
+	v.add_theme_constant_override("separation", 1)
+	parent.add_child(v)
+	var h := _lbl(Loc.t(head), 22, Color(0.95, 0.85, 0.45), true)
+	h.set_meta("key", head)
+	v.add_child(h)
+	return v
+
+
+func _pbtn(v: VBoxContainer, key: String, cb: Callable) -> void:
+	v.add_child(_btn(key, cb, 20))
+
+
+func _ptoggle(v: VBoxContainer, key: String, id: String) -> void:
+	var b := _vbtn("")
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.add_theme_font_size_override("font_size", 20)
+	var upd := func() -> void:
+		b.text = "[" + ("X" if bool(poly_state[id]) else " ") + "] " + Loc.t(key)
+	b.pressed.connect(func() -> void:
+		poly_state[id] = not bool(poly_state[id])
+		Snd.play("ui_click", -6.0)
+		upd.call())
+	b.focus_entered.connect(func() -> void: Snd.play("ui_move", -14.0))
+	b.mouse_entered.connect(func() -> void: b.grab_focus())
+	_rows.append(upd)
+	upd.call()
+	v.add_child(b)
+
+
+func _build_polygon() -> void:
+	poly_box = Control.new()
+	poly_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(poly_box)
+	var t := _lbl(Loc.t("poly.title"), 44, Color(0.95, 0.92, 0.7), true)
+	t.set_meta("key", "poly.title")
+	t.position = Vector2(60, 26)
+	poly_box.add_child(t)
+	var hint := _lbl(Loc.t("poly.hint"), 17, Color(0.8, 0.85, 0.85))
+	hint.set_meta("key", "poly.hint")
+	hint.position = Vector2(62, 84)
+	poly_box.add_child(hint)
+	var c1 := _poly_col(poly_box, 50, "poly.c_start")
+	_pbtn(c1, "poly.park", func() -> void: Game.poly_park())
+	_pbtn(c1, "poly.l0", func() -> void: Game.poly_complex(false))
+	_pbtn(c1, "poly.l1", func() -> void: Game.poly_complex(true))
+	_pbtn(c1, "poly.outpost", func() -> void: Game.poly_complex(false, "outpost", {"dz": "3.6"}))
+	_pbtn(c1, "poly.camp", func() -> void: Game.poly_complex(false, "camp"))
+	_pbtn(c1, "poly.null", func() -> void: Game.poly_complex(false, "null_0", {"dz": "2.2"}))
+	_pbtn(c1, "poly.pit", func() -> void: Game.poly_complex(false, "pits"))
+	_pbtn(c1, "poly.stretch", func() -> void: Game.poly_complex(false, "stretch"))
+	_pbtn(c1, "poly.house", func() -> void: Game.poly_complex(true, "house"))
+	_pbtn(c1, "poly.rooms", func() -> void: show_rooms())
+	var c2 := _poly_col(poly_box, 425, "poly.c_ends")
+	for k in ["ocean", "sky", "basement", "highway", "wall", "async"]:
+		var kk: String = k
+		_pbtn(c2, "poly.e_" + kk, func() -> void: Game.poly_ending(kk))
+	_pbtn(c2, "poly.e_death", func() -> void: Game.poly_death())
+	var c3 := _poly_col(poly_box, 685, "poly.c_beings")
+	for g in ["copies", "copies2", "anim", "lifeform", "objects", "async", "tv", "models"]:
+		var gg: String = g
+		_pbtn(c3, "poly.g_" + gg, func() -> void: Game.poly_gallery(gg))
+	var c4 := _poly_col(poly_box, 995, "poly.c_funcs")
+	_ptoggle(c4, "poly.f_god", "god")
+	_ptoggle(c4, "poly.f_nomon", "nomon")
+	_ptoggle(c4, "poly.f_lfnow", "lfnow")
+	_ptoggle(c4, "poly.f_chase", "chase")
+	_ptoggle(c4, "poly.f_fast", "fast")
+	_ptoggle(c4, "poly.f_stamina", "stamina")
+	var back := _btn("ui.back", func() -> void: Game.leave_polygon(), 24)
+	back.position = Vector2(56, 640)
+	poly_box.add_child(back)
+
+
+## Флаги запуска из полигона (те же ключи, что у отладочных аргументов)
+func poly_flags() -> Dictionary:
+	var f := {}
+	if poly_state.god:
+		f["god"] = "1"
+	if poly_state.nomon:
+		f["no_monsters"] = "1"
+	if poly_state.lfnow or poly_state.chase:
+		f["lf_now"] = "1"
+	if poly_state.chase:
+		f["lf_chase"] = "1"
+	if poly_state.fast:
+		f["fast"] = "1"
+	if poly_state.stamina:
+		f["stamina"] = "1"
+	return f
+
+
+func show_polygon() -> void:
+	hide_all()
+	visible = true
+	poly_box.visible = true
+	(get_node("Dim") as ColorRect).visible = true
+	(get_node("Dim") as ColorRect).color = Color(0, 0, 0, 0.7)
+	_relabel()
+	var first := (poly_box.get_child(2) as VBoxContainer).get_child(1) as Button
+	first.grab_focus()
+
+
+func _build_rooms() -> void:
+	rooms_box = Control.new()
+	rooms_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(rooms_box)
+	var t := _lbl(Loc.t("poly.rooms_t"), 40, Color(0.95, 0.92, 0.7), true)
+	t.set_meta("key", "poly.rooms_t")
+	t.position = Vector2(60, 30)
+	rooms_box.add_child(t)
+	var cols := []
+	for c in 3:
+		var v := VBoxContainer.new()
+		v.position = Vector2(60 + c * 400, 110)
+		v.add_theme_constant_override("separation", 1)
+		rooms_box.add_child(v)
+		cols.append(v)
+	var plan: Array = load("res://src/world/worldgen_rooms.gd").PLAN
+	var i := 0
+	for e in plan:
+		var row: Array = e
+		var typ: String = row[0]
+		var lower: bool = int(row[1]) == 1
+		var b := _btn("room." + typ, func() -> void: Game.poly_complex(lower, "room_%s_0" % typ), 20)
+		(cols[mini(i / 9, 2)] as VBoxContainer).add_child(b)
+		i += 1
+	var back := _btn("ui.back", func() -> void: show_polygon(), 24)
+	back.position = Vector2(56, 640)
+	rooms_box.add_child(back)
+
+
+func show_rooms() -> void:
+	hide_all()
+	visible = true
+	rooms_box.visible = true
+	(get_node("Dim") as ColorRect).visible = true
+	(get_node("Dim") as ColorRect).color = Color(0, 0, 0, 0.7)
+	_relabel()
+	((rooms_box.get_child(1) as VBoxContainer).get_child(0) as Button).grab_focus()
+
+
+# ------------------------------------------------------------ настройки
 
 func _build_settings() -> void:
 	settings_box = VBoxContainer.new()
@@ -253,6 +465,9 @@ func _all(n: Node) -> Array:
 
 
 func hide_all() -> void:
+	world_box.visible = false
+	poly_box.visible = false
+	rooms_box.visible = false
 	main_box.visible = false
 	pause_box.visible = false
 	settings_box.visible = false
@@ -277,6 +492,10 @@ func show_main() -> void:
 
 func show_pause() -> void:
 	hide_all()
+	# в полигоне «В меню» ведёт обратно в полигон
+	var to := pause_box.get_child(3) as Button
+	to.set_meta("key", "ui.to_poly" if Game.mode == "polygon" else "ui.to_menu")
+	to.text = "  " + Loc.t(String(to.get_meta("key")))
 	pause_box.visible = true
 	(get_node("Dim") as ColorRect).visible = true
 	(get_node("Dim") as ColorRect).color = Color(0, 0, 0, 0.6)
@@ -303,8 +522,18 @@ func show_intro(text: String) -> void:
 	tw.tween_property(intro, "modulate:a", 0.0, 0.8)
 
 
+## Надпись по центру без исчезновения (загрузка)
+func show_intro_static(text: String) -> void:
+	hide_all()
+	intro.text = text
+	intro.visible = true
+	intro.modulate.a = 1.0
+
+
 func flash_controls() -> void:
 	controls.text = Loc.t("ui.controls")
+	if Game.freecam_ok():
+		controls.text += "   " + Loc.t("ui.freecam")
 	controls.visible = true
 	controls.modulate.a = 0.0
 	var tw := create_tween()
@@ -316,6 +545,15 @@ func flash_controls() -> void:
 
 
 func _unhandled_input(e: InputEvent) -> void:
+	if e.is_action_pressed("pause") and (world_box.visible or rooms_box.visible or poly_box.visible):
+		if world_box.visible:
+			show_main()
+		elif rooms_box.visible:
+			show_polygon()
+		else:
+			Game.leave_polygon()
+		get_viewport().set_input_as_handled()
+		return
 	if settings_box.visible and e.is_action_pressed("pause"):
 		Cfg.save_cfg()
 		if _settings_from == "pause":

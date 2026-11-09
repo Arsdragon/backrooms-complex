@@ -39,6 +39,8 @@ func setup(complex: Node) -> void:
 	cx = complex
 	_build()
 	visible = false
+	if Game.survival():
+		spawn_cd = 95.0
 	if Cfg.has_arg("lf_now"):
 		spawn_cd = 1.0
 
@@ -294,7 +296,7 @@ func on_layer_changed(_l: int) -> void:
 func _despawn(cd: float) -> void:
 	state = S.DORMANT
 	visible = false
-	spawn_cd = cd
+	spawn_cd = cd * (0.7 if Game.survival() else 1.0)
 	dimv = 0.0
 
 
@@ -325,7 +327,8 @@ func _spawn() -> bool:
 func _intensity() -> float:
 	var t: float = Game.run_time
 	var lay: int = cx.cur
-	return clampf(0.4 + t / 900.0 + lay * 0.35, 0.4, 1.4)
+	var extra := 0.15 if Game.survival() else 0.0
+	return clampf(0.4 + extra + t / 900.0 + lay * 0.35, 0.4, 1.5)
 
 
 func _physics_process(dt: float) -> void:

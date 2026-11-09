@@ -143,3 +143,10 @@ func _process(dt: float) -> void:
 func screenshot(path: String) -> void:
 	var img := get_viewport().get_texture().get_image()
 	img.save_png(path)
+
+
+## 3D-мир живёт в SubViewport без контейнера — сам он ввод не получает, передаём вручную
+## (обзор мышью у героя, G — свободная камера). Меню и пауза (Game) получают событие как раньше.
+func _unhandled_input(e: InputEvent) -> void:
+	if vp != null:
+		vp.push_input(e)

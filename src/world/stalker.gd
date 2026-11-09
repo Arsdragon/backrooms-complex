@@ -20,6 +20,7 @@ var cur_speed := 0.0
 var spawn_cd := 30.0
 var interf := 0.0
 var step_t := 0.0
+var extra := false             # вторая копия («Выживание»): появляется позже и в другом месте
 
 
 func setup(complex: Node) -> void:
@@ -30,6 +31,8 @@ func setup(complex: Node) -> void:
 	body.pose("stand")
 	body.scale = Vector3(1.0, 1.08, 1.0)
 	visible = false
+	if extra:
+		spawn_cd = 90.0
 
 
 func interference() -> float:
@@ -39,7 +42,7 @@ func interference() -> float:
 func on_layer_changed(l: int) -> void:
 	active = false
 	visible = false
-	spawn_cd = 25.0 if l == 1 else 9999.0
+	spawn_cd = (70.0 if extra else (15.0 if Game.survival() else 25.0)) if l == 1 else 9999.0
 
 
 func hear(p: Vector3, radius: float) -> void:
@@ -56,12 +59,24 @@ func _spawn() -> bool:
 	var pl: Player = cx.player
 	var best := Vector3.ZERO
 	var bd := 1e9
+	# другие плачущие копии — чтобы не появиться в том же месте
+	var others := []
+	for e in cx.entities:
+		if e != self and is_instance_valid(e) and (e as Node).get_script() == get_script() and bool(e.active):
+			others.append((e as Node3D).global_position)
+	var near_other := func(p: Vector3) -> bool:
+		for o in others:
+			if (o as Vector3).distance_to(p) < 18.0:
+				return true
+		return false
 	for k in 3:
 		var key := "stalker_%d" % k
 		if not L.places.has(key):
 			continue
 		var p: Vector3 = cx.wrap_near(L.places[key], pl.global_position)
 		var d := p.distance_to(pl.global_position)
+		if near_other.call(p):
+			continue
 		if d > 22.0 and d < bd and not cx.line_clear(p + Vector3(0, 1, 0), pl.global_position + Vector3(0, 1, 0)):
 			bd = d
 			best = p
@@ -70,6 +85,8 @@ func _spawn() -> bool:
 		if c.x == 999999:
 			return false
 		best = Vector3((c.x + 0.5) * LD.C, L.floor_y, (c.y + 0.5) * LD.C)
+		if near_other.call(best):
+			return false
 	global_position = best
 	active = true
 	visible = true
