@@ -19,7 +19,10 @@ Found-footage хоррор по лору Backrooms Кейна Парсонса (
 - `--scene=complex|lower|park|ending|gallery`, `--seed=N`, `--place=<ключ LayerData.places>` `--dx/--dz`, `--yaw/--pitch`, `--pos=x,y,z`
 - `--kind=ocean|sky|basement|highway|wall|async` (ending), `--force_end=…`, `--auto_hatch` (подвал), `--fall_at=сек` (парк)
 - `--auto` бот бродит и пишет `BOT …` в лог, `--botrun`, `--lf_now`, `--lf_chase`, `--god`, `--vhs=0..1.5`
-- `--set=copies|copies2|objects|async|lifeform|anim|models0..3` для gallery; в парке `--pos=x,y,z --yaw --pitch`.
+- `--set=copies|copies2|objects|async|lifeform|anim|tv|models0..3` для gallery (камера: `--cx --dist --cy --ly --ox`);
+  в парке `--pos=x,y,z --yaw --pitch` (углы в радианах).
+- `--tour=<папка> [--only=подстрока]` — обойти все `room_*` текущего слоя и снять по два кадра; `--crouch` — присесть;
+  `--gen_prof` — время этапов генерации.
 - `tools/dev/aabb.gd` — габариты моделей (`--headless --script`).
 
 ## Архитектура (src/)
@@ -29,6 +32,10 @@ Found-footage хоррор по лору Backrooms Кейна Парсонса (
 - `world/layer_data.gd` — тор 384×384 клеток по 2.4 м, стены на рёбрах; `worldgen.gd` — два слоя, особые комнаты, кабели, декор.
 - `world/chunk_builder.gd` — меши чанка 12×12 в потоке; свет ламп «запечён» в цвет вершин (r ровный, g мигающий, b красный,
   a группа мигания; UV2.x — AO). Шейдеры `arch`/`prop`/`decal` unshaded, глобальные uniform `g_*` в project.godot.
+- `world/worldgen_rooms.gd` — каталог «странных комнат» (PLAN: тип, слой, количество, кольцо расстояний, размер) и
+  `sprinkle` — мелочи по миру понемногу; места пишутся в `places["room_<тип>_<k>"]`. Строители предметов этих комнат —
+  `world/props_rooms.gd` (Props делегирует туда неизвестные виды). `world/tv.gd` (TVHub) — телеканалы 2D-SubViewport.
+- `layer_data.used`: 1 — особая комната (сюда не ставятся случайные копии/предметы из `_scatter` и `sprinkle`), 2 — свет задан вручную.
 - `world/complex.gd` — подгрузка чанков, слои, экспозиция, мигание, события (яма → слой 1, лестница Async, Порог, нулевая зона).
 - `world/human.gd` — люди: модель Rocketbox (скелет Bip01/Bip02) или запасной вариант из примитивов (`--prim_humans`).
   Позы задаются суставами-посредниками j[...] (оси модели), `_drive()` каждый кадр переводит их в кости (руки из A-позы

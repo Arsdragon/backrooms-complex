@@ -98,7 +98,7 @@ func _physics_process(dt: float) -> void:
 	rotation.y = yaw
 	head.rotation.x = pitch
 
-	var want_crouch := not frozen and Input.is_action_pressed("crouch")
+	var want_crouch := not frozen and (Input.is_action_pressed("crouch") or Cfg.has_arg("crouch"))
 	if crouching and not want_crouch:
 		# встать можно, только если над головой есть место
 		var q := PhysicsRayQueryParameters3D.create(global_position + Vector3(0, 0.3, 0), global_position + Vector3(0, 1.85, 0), 1)

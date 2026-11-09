@@ -456,7 +456,8 @@ static func _scatter(L: LayerData, lay: int) -> void:
 			var cp := 1.0 / 560.0 if dist < 150 else 1.0 / 1400.0
 			if lay == 1:
 				cp = 1.0 / 650.0
-			if r < cp and dist > 7.0:
+			# в особых комнатах своя обстановка — копии и кривые предметы туда не ставим
+			if r < cp and dist > 7.0 and L.used[i] == 0:
 				var who: String
 				if lay == 0 and rr.randf() < 0.7:
 					who = PARK_PEOPLE[rr.randi_range(0, PARK_PEOPLE.size() - 1)]
@@ -477,7 +478,7 @@ static func _scatter(L: LayerData, lay: int) -> void:
 				continue
 			r -= cp
 			# кривые предметы
-			if r < 1.0 / 520.0 and dist > 5.0:
+			if r < 1.0 / 520.0 and dist > 5.0 and L.used[i] == 0:
 				var what: String = OBJECTS[rr.randi_range(0, OBJECTS.size() - 1)]
 				var ow: String = OBJ_WRONG[rr.randi_range(0, OBJ_WRONG.size() - 1)]
 				var p2 := Vector3(c.x + rr.randf_range(-0.5, 0.5), L.floor_y, c.y + rr.randf_range(-0.5, 0.5))

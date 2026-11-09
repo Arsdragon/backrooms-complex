@@ -1,7 +1,7 @@
 class_name TVHub
 extends Node
 ## Телеканалы для редких телевизоров в Комплексе. Каждый канал — маленький SubViewport (192×144),
-## который рисуется, только пока какой-нибудь его экран виден. Экраны берут его текстуру.
+## 2D, перерисовка 12 раз в секунду — это дёшево. Экраны берут его текстуру.
 
 const CHANNELS := ["async_ad", "news", "bars", "explorers", "weather", "home"]
 
@@ -27,7 +27,6 @@ func texture(ch: String) -> Texture2D:
 		var c := Channel.new()
 		c.kind = ch
 		c.set_anchors_preset(Control.PRESET_FULL_RECT)
-		c.size = Vector2(192, 144)
 		vp.add_child(c)
 		add_child(vp)
 		vps[ch] = vp

@@ -115,6 +115,10 @@ func _gather_lights() -> void:
 				y = fy + 0.06
 			var I := 1.0
 			var grp := -1
+			# зал-великан: лампы под 9-метровым потолком светят как будто ниже, иначе пол тонет во тьме
+			if h > 5.0 and D.zone[L.idx(x, z)] != L.Z_STRETCH:
+				y = fy + 4.2
+				I = 1.25
 			match k:
 				L.L_FLICK:
 					grp = (x * 7 + z * 13) % 7

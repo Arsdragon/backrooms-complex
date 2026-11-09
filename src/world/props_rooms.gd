@@ -137,7 +137,7 @@ static func _crt(parent: Node3D, cx: Node3D, ch: String, pos: Vector3, rot := 0.
 	t.scale = Vector3.ONE * sc
 	if P.model(t, "television_02", Vector3.ZERO, 0.0, 1.35, false) == null:
 		P.box(t, Vector3(0.6, 0.5, 0.55), Vector3(0, 0.25, 0), Mats.col(Color(0.2, 0.19, 0.18), "metal", 0.3))
-	var q := P.quad(t, Vector2(0.4, 0.3), Vector3(0, 0.29, 0.247), tv_mat(cx, ch))
+	var q := P.quad(t, Vector2(0.4, 0.3), Vector3(0, 0.29, 0.166), tv_mat(cx, ch))
 	q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return t
 

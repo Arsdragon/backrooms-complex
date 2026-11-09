@@ -1,5 +1,5 @@
 extends Node3D
-## Отладка: все копии, предметы и Сущность в ряд при ровном свете. --scene=gallery --set=copies|objects|lifeform|async
+## Отладка: все копии, предметы и Сущность в ряд при ровном свете. --scene=gallery --set=copies|objects|lifeform|async|tv
 
 const Props := preload("res://src/world/props.gd")
 const LifeformS := preload("res://src/world/lifeform.gd")
@@ -49,6 +49,9 @@ func _ready() -> void:
 		"objects":
 			for w in ["bench", "lamp", "bin", "tree", "fountain", "slide", "swing", "cart", "car", "stroller", "chair", "desk", "cabinet", "tv", "hill_chair"]:
 				items.append({"k": "obj", "what": w, "wrong": "none"})
+		"tv":
+			for ch in ["async_ad", "news", "explorers", "home", "weather", "bars"]:
+				items.append({"k": "tv_on", "ch": ch})
 		"async":
 			for w in ["lamp_stand", "case", "case_open", "crate", "table", "spool", "generator", "board", "rover", "cones", "tripod", "radio", "winch"]:
 				items.append({"k": "async", "what": w})
@@ -130,8 +133,9 @@ func _ready() -> void:
 	cam.fov = 60.0
 	var span := maxf(float(items.size()) * 3.2, 10.0)
 	var dist := float(Cfg.arg("dist", str(minf(span * 0.75, 30.0))))
-	cam.position = Vector3(float(Cfg.arg("cx", "0")), 1.6, dist)
-	cam.look_at(Vector3(float(Cfg.arg("cx", "0")), 1.0, 0))
+	var lx := float(Cfg.arg("cx", "0"))
+	cam.position = Vector3(lx + float(Cfg.arg("ox", "0")), float(Cfg.arg("cy", "1.6")), dist)
+	cam.look_at(Vector3(lx, float(Cfg.arg("ly", "1.0")), 0))
 	cam.current = true
 	if Game.main != null:
 		Game.main.osd.shown = false
