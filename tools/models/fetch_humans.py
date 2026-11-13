@@ -1,6 +1,8 @@
 """Люди: Microsoft Rocketbox (MIT, https://github.com/microsoft/Microsoft-Rocketbox).
 Скачивает FBX без лицевой анимации + цвет и прозрачность, ужимает текстуры до 1024 px → humans/<id>/.
-    python tools/models/fetch_humans.py [id …]
+    python tools/models/fetch_humans.py [--normals] [id …]
+--normals — ещё и карты нормалей <id>_<часть>_normal.tga (~3 МБ на аватар): human.gd подхватит их сам
+(prop-шейдер: nmap, соглашение DirectX — как у Rocketbox).
 """
 import json, os, sys, time, urllib.request, concurrent.futures as cf
 from PIL import Image
@@ -86,7 +88,9 @@ def fetch(av, files):
 
 
 def main():
-    only = sys.argv[1:]
+    args = sys.argv[1:]
+    normals = "--normals" in args
+    only = [a for a in args if not a.startswith("--")]
     t = tree()
     jobs = []
     for role, av in CAST.items():
@@ -94,7 +98,8 @@ def main():
             continue
         pre = "Assets/Avatars/" + av + "/"
         files = [x["path"] for x in t if x["path"].startswith(pre) and x["type"] == "blob" and (
-            x["path"].endswith(av.split("/")[-1] + ".fbx") or ("_color" in x["path"].rsplit("/", 1)[-1] and x["path"].endswith(".tga")))]
+            x["path"].endswith(av.split("/")[-1] + ".fbx") or (("_color" in x["path"].rsplit("/", 1)[-1]
+            or (normals and "_normal" in x["path"].rsplit("/", 1)[-1])) and x["path"].endswith(".tga")))]
         jobs.append((av, files))
     done = 0
     with cf.ThreadPoolExecutor(3) as ex:

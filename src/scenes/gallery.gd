@@ -1,5 +1,5 @@
 extends Node3D
-## Отладка: все копии, предметы и Сущность в ряд при ровном свете. --scene=gallery --set=copies|objects|lifeform|async|tv
+## Отладка: все копии, предметы и Сущность в ряд при ровном свете. --scene=gallery --set=copies|objects|lifeform|async|tv|decor
 
 const Props := preload("res://src/world/props.gd")
 const LifeformS := preload("res://src/world/lifeform.gd")
@@ -58,6 +58,21 @@ func _ready() -> void:
 			items.append({"k": "hazmat", "pose": "lie", "seed": 9})
 			for f in ["clothes", "tripod_cam", "drag", "lone_door", "lost_camp"]:
 				items.append({"k": f})
+		"decor":
+			# мелочи декора: обломки, бумаги, колонки, манекены, телевизор и торшер дома, плесень/потёки на стене
+			for f in [["obj", "debris"], ["papers", ""], ["speaker", ""], ["speaker_hub", ""], ["mannequin", ""], ["mannequin", "1"],
+					["house", "tv"], ["house", "floorlamp"], ["mold", "0"], ["mold", "1"], ["mold", "2"], ["mold", "3"]]:
+				var a: Array = f
+				var it := {"k": a[0], "seed": items.size() * 13 + 5}
+				if a[0] == "obj":
+					it["what"] = a[1]
+				elif a[0] == "house":
+					it["what"] = a[1]
+				elif a[0] == "mold":
+					it["s"] = 1.6
+					it["v"] = int(a[1])
+					it["wall"] = true
+				items.append(it)
 		"async":
 			for w in ["lamp_stand", "case", "case_open", "crate", "table", "spool", "generator", "board", "rover", "cones", "tripod", "radio", "winch"]:
 				items.append({"k": "async", "what": w})
@@ -71,7 +86,8 @@ func _ready() -> void:
 		ids.sort()
 		# «models» без номера — все модели сеткой по 16 в ряд (для полигона), иначе — часть из 11
 		var all := set_name == "models"
-		var per := 16 if all else 11
+		# часть из 11 — в два ряда (6 + 5, второй ряд со сдвигом на полшага): всё в кадре и не слишком далеко
+		var per := 16 if all else 6
 		if not all:
 			var part := int(set_name.substr(6)) if set_name.length() > 6 else 0
 			ids = ids.slice(part * 11, part * 11 + 11)
@@ -83,9 +99,11 @@ func _ready() -> void:
 			var row := i / per
 			var n_in := mini(per, ids.size() - row * per)
 			var mx := -float(n_in - 1) * 1.1 + float(i % per) * 2.2
-			var mz := float(row) * 3.4
+			var mz := float(row) * (3.4 if all else 2.6)
 			add_child(m)
-			m.position = Vector3(mx, 0, mz)
+			# подвесные модели (начало — точка крепления к потолку, сетка ниже нуля) — поднять на пол
+			var bb := Models.aabb(id)
+			m.position = Vector3(mx, maxf(-bb.position.y, 0.0), mz)
 			Props.set_light(m, Color(0.45, 0.0, 0.0, 0.0))
 			var lb := Props.label(id, Props.font_sign(), 0.0022, Color(1, 1, 1))
 			lb.position = Vector3(mx, 0.05, mz + 0.9)
@@ -94,8 +112,10 @@ func _ready() -> void:
 		cam = Camera3D.new()
 		add_child(cam)
 		cam.fov = 60.0
-		cam.position = Vector3(0, 2.2, 13.0) if not all else Vector3(0, 2.0, -0.8)
-		cam.look_at(Vector3(0, 0.8, 0) if not all else Vector3(0, 0.6, 6.0))
+		# два ряда по 6 и 5 моделей (11 м): камера ближе (видны детали), --cx/--dist/--cy/--ly — навести на одну модель
+		var mcx := float(Cfg.arg("cx", "0"))
+		cam.position = Vector3(mcx + float(Cfg.arg("ox", "0")), float(Cfg.arg("cy", "3.2")), float(Cfg.arg("dist", "8.4"))) if not all else Vector3(0, 2.0, -0.8)
+		cam.look_at(Vector3(mcx, float(Cfg.arg("ly", "0.5")), 1.3) if not all else Vector3(0, 0.6, 6.0))
 		cam.current = true
 		_fly()
 		if Game.main != null:
@@ -105,7 +125,7 @@ func _ready() -> void:
 	var x := -float(items.size() - 1) * 1.6
 	for d in items:
 		var dd: Dictionary = d
-		dd["p"] = Vector3(x, 0, 0)
+		dd["p"] = Vector3(x, 1.4, -1.89) if bool(dd.get("wall", false)) else Vector3(x, 0, 0)
 		var n: Node3D = Props.spawn(self, dd, 0)
 		if n != null:
 			add_child(n)

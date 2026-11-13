@@ -115,19 +115,19 @@ func _gather_lights() -> void:
 				y = fy + 0.06
 			var I := 1.0
 			var grp := -1
-			# высокий зал или провал: лампа под далёким потолком светит как будто ниже, иначе пол тонет во тьме
+			# высокий зал или провал: светильник висит на тросах на 4.2 м над полом (как LightGrid и _fixture)
 			var fl := D.fh[i] * 0.1
-			if h - fl > 5.0 and D.zone[L.idx(x, z)] != L.Z_STRETCH:
+			if (k == L.L_ON or k == L.L_FLICK) and D.lamp_hangs(x, z):
 				y = fy + fl + 4.2
-				I = 1.25
+				I = 2.3
 			match k:
 				L.L_FLICK:
-					grp = posmod(x * 7 + z * 13, 7)
+					grp = L.flick_group(x, z)
 				L.L_RED:
 					I = 0.45
 					y = fy + h - 0.15
 				L.L_ASYNC:
-					I = 1.9
+					I = 3.2
 					y = fy + 1.9
 				L.L_BULB:
 					I = 0.95
@@ -242,7 +242,9 @@ func _cell_lights() -> void:
 			var x := x0 + i
 			var z := z0 + j
 			var c := L.cell_center(x, z)
-			var col := light_at(Vector3(c.x, fy + D.fh[L.idx(x, z)] * 0.1 + 1.2, c.y), Vector3.UP, true, Vector2i(x, z))
+			# замер на 1.2 м над полом; у провалов и ям — у их верха (иначе потолок над провалом — чёрное «пятно сажи»)
+			var fh0 := maxf(D.fh[L.idx(x, z)] * 0.1, -0.5) if D.flo[L.idx(x, z)] != L.F_PIT else 0.0
+			var col := light_at(Vector3(c.x, fy + fh0 + 1.2, c.y), Vector3.UP, true, Vector2i(x, z))
 			var k := (j * L.CHUNK + i) * 4
 			cell_light[k] = col.r * 2.0
 			cell_light[k + 1] = col.g * 2.0
@@ -259,8 +261,9 @@ func _s(mat: int) -> Dictionary:
 	return surf[mat]
 
 
-## Четырёхугольник p0..p3 (по кругу) с разбиением nu×nv, свет из клетки cell.
-## uvf: Callable(p) -> Vector2, aof: Callable(p) -> float
+## Четырёхугольник p0..p3 (по кругу) с разбиением nu×nv.
+## Свет считается попиксельно (grid_light.gdshaderinc), в вершинах — только «глубина» aof (UV2.x).
+## uvf: Callable(p) -> Vector2, aof: Callable(p) -> float. cell/ceiling/lit оставлены для совместимости вызовов.
 func quad(mat: int, p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, n: Vector3, nu: int, nv: int,
 		cell: Vector2i, uvf: Callable, aof: Callable, ceiling := false, lit := true) -> void:
 	var s := _s(mat)
@@ -270,16 +273,18 @@ func quad(mat: int, p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, n: Vecto
 	var cs: PackedColorArray = s.c
 	var u2: PackedVector2Array = s.uv2
 	var grid := []
+	var nocol := Color(0, 0, 0, 0)
 	for b in nv + 1:
 		var row := []
 		var tb := float(b) / nv
 		for a in nu + 1:
 			var ta := float(a) / nu
 			var p := p0.lerp(p1, ta).lerp(p3.lerp(p2, ta), tb)
-			var col := light_at(p + n * 0.05, n, false, cell, ceiling) if lit else Color(0, 0, 0, 0)
-			row.append([p, col, uvf.call(p), aof.call(p)])
+			row.append([p, nocol, uvf.call(p), aof.call(p)])
 		grid.append(row)
-	var flip := (p1 - p0).cross(p3 - p0).dot(n) * WIND < 0.0
+	# обход — по диагоналям: у вырожденного четырёхугольника (одна сторона нулевой длины, бок лестницы/пандуса)
+	# (p1−p0)×(p3−p0) = 0, и грань смотрела бы не туда
+	var flip := (p2 - p0).cross(p3 - p1).dot(n) * WIND < 0.0
 	for b in nv:
 		for a in nu:
 			var q0: Array = grid[b][a]
@@ -307,6 +312,22 @@ func _uv_xz(p: Vector3) -> Vector2:
 	return Vector2(p.x, p.z)
 
 
+## Потолок: сетка плит сдвинута на 0.3 м по x, чтобы светильник 0.6×1.2 в центре клетки лёг ровно в ячейку
+func _uv_ceil(p: Vector3) -> Vector2:
+	return Vector2(p.x + 0.3, p.z)
+
+
+## Вертикальная грань: u — вдоль грани (по мировой оси), v — вниз (картинка стоит прямо)
+static func _uv_wall(n: Vector3) -> Callable:
+	if absf(n.x) > 0.5:
+		return func(p: Vector3) -> Vector2: return Vector2(p.z, -p.y)
+	return func(p: Vector3) -> Vector2: return Vector2(p.x, -p.y)
+
+
+static func _one(_p: Vector3) -> float:
+	return 1.0
+
+
 func _wall_mat(zn: int) -> int:
 	match zn:
 		L.Z_OLD: return M_WALL_OLD
@@ -327,7 +348,9 @@ func _floor_mat(zn: int, x: int, z: int) -> int:
 		L.Z_HOUSE: return M_FLOOR_WOOD
 		L.Z_STORE, L.Z_CLASS: return M_LINO
 		L.Z_DARK:
-			return M_CARPET_WET if (x * 31 + z * 17) % 5 < 2 else M_CARPET
+			# один материал на всю сырую зону (раньше клетки чередовались — пол «в шашечку» по 2.4 м);
+			# пятна сырости даёт маска по миру (carpet_damp)
+			return M_CARPET_WET
 	return M_CARPET
 
 
@@ -354,27 +377,17 @@ func _cell(x: int, z: int) -> void:
 	var X1 := X0 + L.C
 	var Z1 := Z0 + L.C
 	var cell := Vector2i(x, z)
-	var walls := [L.edge_solid(D.edge(x, z, 0)) or D.edge(x, z, 0) == L.E_DOOR,
-		L.edge_solid(D.edge(x, z, 1)) or D.edge(x, z, 1) == L.E_DOOR,
-		L.edge_solid(D.edge(x, z, 2)) or D.edge(x, z, 2) == L.E_DOOR,
-		L.edge_solid(D.edge(x, z, 3)) or D.edge(x, z, 3) == L.E_DOOR]
-	var aof := func(p: Vector3) -> float:
-		var a := 1.0
-		var dxs := [X1 - p.x, Z1 - p.z, p.x - X0, p.z - Z0]
-		for d in 4:
-			if walls[d]:
-				a *= 0.55 + 0.45 * smoothstep(0.0, 0.9, float(dxs[d]))
-		return a
+	# затенение углов и стен считается попиксельно (g_ao); здесь — только «глубина» провалов
+	var aof := func(_p: Vector3) -> float: return 1.0
 	var flip := zn == L.Z_FLIP
-	var aofc := func(p: Vector3) -> float:
-		return 0.35 + 0.65 * float(aof.call(p))
+	var aofc := aof
 	var off := D.fh[i] * 0.1
 	var fyc := fy + off
 	if f == L.F_FLOOR:
 		if flip:
 			# перевёртыш: на полу — потолочные плиты и лампы
 			quad(M_CEIL_TILE, Vector3(X0, fyc, Z0), Vector3(X1, fyc, Z0), Vector3(X1, fyc, Z1), Vector3(X0, fyc, Z1),
-				Vector3.UP, 3, 3, cell, _uv_xz, aofc, true)
+				Vector3.UP, 3, 3, cell, _uv_ceil, aofc, true)
 			_fixture(x, z, fyc, zn, true)
 		elif D.ramp[i] != 0:
 			_ramp(x, z, zn, aof)
@@ -399,7 +412,7 @@ func _cell(x: int, z: int) -> void:
 				Vector3.DOWN, 3, 3, cell, _uv_xz, aof)
 		else:
 			quad(_ceil_mat(zn), Vector3(X0, cy, Z0), Vector3(X1, cy, Z0), Vector3(X1, cy, Z1), Vector3(X0, cy, Z1),
-				Vector3.DOWN, 3, 3, cell, _uv_xz, aofc, true)
+				Vector3.DOWN, 3, 3, cell, _uv_ceil, aofc, true)
 			_fixture(x, z, cy, zn)
 		if h - off < 2.2 and h - off > 0.0:
 			# низкий потолок — твёрдый (пролезть можно только пригнувшись)
@@ -426,10 +439,10 @@ func _cell(x: int, z: int) -> void:
 		var zl := _wall_mat(D.zone[L.idx(low_cell.x, low_cell.y)])
 		if d == 0:
 			quad(zl, Vector3(X1, fy + lo, Z0), Vector3(X1, fy + lo, Z1), Vector3(X1, fy + hi, Z1), Vector3(X1, fy + hi, Z0),
-				nrm, 3, 2, low_cell, func(p: Vector3) -> Vector2: return Vector2(p.z, p.y), func(_p: Vector3) -> float: return 0.9)
+				nrm, 3, 2, low_cell, _uv_wall(nrm), _one)
 		else:
 			quad(zl, Vector3(X0, fy + lo, Z1), Vector3(X1, fy + lo, Z1), Vector3(X1, fy + hi, Z1), Vector3(X0, fy + hi, Z1),
-				nrm, 3, 2, low_cell, func(p: Vector3) -> Vector2: return Vector2(p.x, p.y), func(_p: Vector3) -> float: return 0.9)
+				nrm, 3, 2, low_cell, _uv_wall(nrm), _one)
 	# обрыв/ступень пола между клетками разной высоты (через открытые рёбра; у стен — сами стены идут до дна)
 	if f == L.F_FLOOR:
 		for d in [0, 1]:
@@ -472,18 +485,38 @@ func _drop_face(x: int, z: int, d: int) -> void:
 	var zl := D.zone[L.idx(low_cell.x, low_cell.y)]
 	var mat := _wall_mat(zl)
 	var top := fy + maxf(hi0, hi1)
-	var aof := func(p: Vector3) -> float: return 0.55 + 0.4 * smoothstep(top - 2.0, top, p.y)
+	var aof := func(p: Vector3) -> float: return 0.8 + 0.2 * smoothstep(top - 2.0, top, p.y)
 	if depth > 3.4:
 		# дыра: те же обои уходят вниз в темноту
-		aof = func(p: Vector3) -> float: return clampf(1.0 - (top - p.y) / 5.0, 0.03, 1.0) * 0.85
-	var uvf: Callable
-	if d == 0:
-		uvf = func(p: Vector3) -> Vector2: return Vector2(p.z, p.y)
-	else:
-		uvf = func(p: Vector3) -> Vector2: return Vector2(p.x, p.y)
+		aof = func(p: Vector3) -> float: return clampf(1.0 - (top - p.y) / 5.0, 0.03, 1.0) * 0.9
+	var uvf := _uv_wall(n)
 	var nv := 2 if depth < 2.0 else (4 if depth < 5.0 else 7)
-	quad(mat, Vector3(a.x, fy + lo0, a.z), Vector3(b.x, fy + lo1, b.z), Vector3(b.x, fy + hi1, b.z), Vector3(a.x, fy + hi0, a.z),
-		n, 3, nv, low_cell, uvf, aof)
+	var a_st := D.is_stairs(L.idx(x, z))
+	var b_st := D.is_stairs(L.idx(nx, nz))
+	if a_st or b_st:
+		# бок лестницы: верх и низ грани идут ступеньками, как проступи (с любой стороны), сторона — по месту
+		var segs := 16
+		for k in segs:
+			var pa := a.lerp(b, float(k) / segs)
+			var pb := a.lerp(b, float(k + 1) / segs)
+			var pm := (pa + pb) * 0.5
+			var ya := _stair_off(x, z, pm.x, pm.z) if a_st else D.floor_off_cell(x, z, pm.x, pm.z)
+			var yb := _stair_off(nx, nz, pm.x, pm.z) if b_st else D.floor_off_cell(nx, nz, pm.x, pm.z)
+			var yh := maxf(ya, yb)
+			var yl := minf(ya, yb)
+			if yh - yl < 0.01:
+				continue
+			var ns := Vector3(o.x, 0, o.y) if ya > yb else Vector3(-o.x, 0, -o.y)
+			quad(mat, Vector3(pa.x, fy + yl, pa.z), Vector3(pb.x, fy + yl, pb.z), Vector3(pb.x, fy + yh, pb.z), Vector3(pa.x, fy + yh, pa.z),
+				ns, 1, 1, low_cell, _uv_wall(ns), aof)
+	else:
+		quad(mat, Vector3(a.x, fy + lo0, a.z), Vector3(b.x, fy + lo1, b.z), Vector3(b.x, fy + hi1, b.z), Vector3(a.x, fy + hi0, a.z),
+			n, 3, nv, low_cell, uvf, aof)
+		# плинтус у низа уступа (терраса, ступень пола), если низкая сторона — ровный пол обычной зоны
+		var li := L.idx(low_cell.x, low_cell.y)
+		if depth < 3.4 and depth > 0.25 and _has_base(zl) and zl != L.Z_FLIP and D.ramp[li] == 0 and D.flo[li] == L.F_FLOOR:
+			var ylow := fy + D.fh[li] * 0.1
+			_baseboard(Vector3(a.x, 0, a.z), Vector3(b.x, 0, b.z), ylow, n, low_cell)
 	# коллизия: кусками вдоль ребра (у пандуса верх грани наклонный)
 	var segs := 1 if (absf(ya0 - ya1) < 0.02 and absf(yb0 - yb1) < 0.02) else 4
 	for k in segs:
@@ -523,21 +556,21 @@ func _ramp(x: int, z: int, zn: int, aof: Callable) -> void:
 	else:
 		var steps := maxi(2, int(round(absf(dy) / 0.19)))
 		var mat_r := M_FLOOR_CONC if mat == M_FLOOR_CONC else mat
-		var rn := -fwd if dy > 0.0 else fwd
+		# подступенок смотрит к нижней проступи: вверх по ходу — назад (−fwd), вниз по ходу — вперёд (+fwd)
+		var uvr := _uv_wall(fwd)
 		var prev := y0
 		for k in steps:
 			var t0 := float(k) / steps
 			var t1 := float(k + 1) / steps
 			var ys := y0 + dy * (k + 0.5) / steps
-			# подступенок
-			quad(mat_r, P.call(t0, 0.0, prev), P.call(t0, 1.0, prev), P.call(t0, 1.0, ys), P.call(t0, 0.0, ys), rn if ys > prev else -rn, 2, 1, cell,
-				func(p: Vector3) -> Vector2: return Vector2(p.x + p.z, p.y), func(_p: Vector3) -> float: return 0.7)
+			# подступенок (кромка ступени чуть темнее — подсказка глазу)
+			quad(mat_r, P.call(t0, 0.0, prev), P.call(t0, 1.0, prev), P.call(t0, 1.0, ys), P.call(t0, 0.0, ys), -fwd if ys > prev else fwd, 2, 1, cell,
+				uvr, func(_p: Vector3) -> float: return 0.82)
 			# проступь
-			quad(mat, P.call(t0, 0.0, ys), P.call(t1, 0.0, ys), P.call(t1, 1.0, ys), P.call(t0, 1.0, ys), Vector3.UP, 2, 2, cell, _uv_xz,
-				func(p: Vector3) -> float: return float(aof.call(p)) * 0.95)
+			quad(mat, P.call(t0, 0.0, ys), P.call(t1, 0.0, ys), P.call(t1, 1.0, ys), P.call(t0, 1.0, ys), Vector3.UP, 2, 2, cell, _uv_xz, aof)
 			prev = ys
-		quad(mat_r, P.call(1.0, 0.0, prev), P.call(1.0, 1.0, prev), P.call(1.0, 1.0, y1), P.call(1.0, 0.0, y1), rn if y1 > prev else -rn, 2, 1, cell,
-			func(p: Vector3) -> Vector2: return Vector2(p.x + p.z, p.y), func(_p: Vector3) -> float: return 0.7)
+		quad(mat_r, P.call(1.0, 0.0, prev), P.call(1.0, 1.0, prev), P.call(1.0, 1.0, y1), P.call(1.0, 0.0, y1), -fwd if y1 > prev else fwd, 2, 1, cell,
+			uvr, func(_p: Vector3) -> float: return 0.82)
 	# коллизия — наклонная плита (у лестницы тоже: ходить по ней плавно)
 	var along := Vector3(fwd.x * L.C, dy, fwd.z * L.C)
 	var len_s := along.length()
@@ -546,6 +579,29 @@ func _ramp(x: int, z: int, zn: int, aof: Callable) -> void:
 	var bz := bx.cross(by).normalized()
 	var mid := Vector3(ctr.x, (y0 + y1) * 0.5, ctr.z) - by * 0.25
 	boxes.append([mid, Vector3(len_s * 0.5 + 0.06, 0.25, L.C * 0.5), Basis(bx, by, bz)])
+
+
+## Высота проступи лестницы (м от floor_y) в точке (px, pz) клетки-лестницы (x, z): ступеньками, как в _ramp
+func _stair_off(x: int, z: int, px: float, pz: float) -> float:
+	var i := L.idx(x, z)
+	var rd := D.ramp_dir(i)
+	if rd < 0 or not D.is_stairs(i):
+		return D.floor_off_cell(x, z, px, pz)
+	var o: Vector2i = L.DIRS[rd]
+	var lx := clampf((px - x * L.C) / L.C, 0.0, 1.0)
+	var lz := clampf((pz - z * L.C) / L.C, 0.0, 1.0)
+	var t := lx
+	if rd == 1:
+		t = lz
+	elif rd == 2:
+		t = 1.0 - lx
+	elif rd == 3:
+		t = 1.0 - lz
+	var y0 := D.fh[i] * 0.1
+	var y1 := D.fh[L.idx(x + o.x, z + o.y)] * 0.1
+	var steps := maxi(2, int(round(absf(y1 - y0) / 0.19)))
+	var k := clampi(int(floor(t * steps)), 0, steps - 1)
+	return y0 + (y1 - y0) * (k + 0.5) / steps
 
 
 func _fixture(x: int, z: int, cy: float, zn: int, up := false) -> void:
@@ -570,13 +626,24 @@ func _fixture(x: int, z: int, cy: float, zn: int, up := false) -> void:
 		mat = M_RED_LAMP
 	var group := 0.0
 	if k == L.L_FLICK:
-		group = float(posmod(x * 7 + z * 13, 7)) / 8.0 + 0.0001
+		group = float(L.flick_group(x, z)) / 8.0 + 0.0001
 	elif k == L.L_GREEN:
 		group = 7.0 / 8.0
 	var col := Color(1.0 if (k == L.L_ON or k == L.L_BULB) else 0.0, 1.0 if (k == L.L_FLICK or k == L.L_GREEN) else 0.0, 1.0 if k == L.L_RED else 0.0, group)
 	if k == L.L_DEAD:
-		# погасший светильник освещён соседними лампами, как потолок
-		col = light_at(Vector3(c.x, y - 0.05 * fn.y, c.y), fn, false, Vector2i(x, z), true)
+		# погасший светильник освещён соседними лампами, как потолок (попиксельно)
+		col = Color(0, 0, 0, 0)
+	# высокий зал: светильник висит на тросах там, откуда идёт свет (как в LightGrid/_gather_lights)
+	var fl := D.fh[L.idx(x, z)] * 0.1
+	if not up and (k == L.L_ON or k == L.L_FLICK or k == L.L_DEAD) and D.lamp_hangs(x, z):
+		y = fy + fl + 4.2
+		var cell := Vector2i(x, z)
+		var hy := 0.07
+		_box(M_FIXTURE_DEAD, Vector3(c.x, y + hy * 0.5 + 0.004, c.y), Vector3(hw + 0.025, hy * 0.5, hd + 0.025), cell)
+		for sgn: float in [-1.0, 1.0]:
+			var rz: float = c.y + sgn * (hd - 0.12)
+			var top := cy
+			_box(M_FIXTURE_DEAD, Vector3(c.x, (y + hy + top) * 0.5, rz), Vector3(0.006, (top - y - hy) * 0.5, 0.006), cell)
 	var s := _s(mat)
 	var p0 := Vector3(c.x - hw, y, c.y - hd)
 	var p1 := Vector3(c.x + hw, y, c.y - hd)
@@ -604,6 +671,22 @@ func _fixture(x: int, z: int, cy: float, zn: int, up := false) -> void:
 	s.c = cs
 	s.uv = us
 	s.uv2 = u2
+
+
+## Короб из 6 граней (подвесной светильник, тросы)
+func _box(mat: int, ctr: Vector3, h: Vector3, cell: Vector2i) -> void:
+	var u01 := func(p: Vector3) -> Vector2: return Vector2(p.x + p.z, -p.y)
+	var hx := Vector3(h.x, 0, 0)
+	var hy := Vector3(0, h.y, 0)
+	var hz := Vector3(0, 0, h.z)
+	var faces := [[Vector3.UP, hy, hx, hz], [Vector3.DOWN, -hy, hx, -hz], [Vector3.RIGHT, hx, hz, hy],
+		[Vector3.LEFT, -hx, -hz, hy], [Vector3.BACK, hz, -hx, hy], [Vector3.FORWARD, -hz, hx, hy]]
+	for f in faces:
+		var n: Vector3 = f[0]
+		var c: Vector3 = ctr + (f[1] as Vector3)
+		var a: Vector3 = f[2]
+		var b: Vector3 = f[3]
+		quad(mat, c - a - b, c + a - b, c + a + b, c - a + b, n, 1, 1, cell, u01, _one)
 
 
 func _pit(x: int, z: int) -> void:
@@ -636,40 +719,44 @@ func _pit(x: int, z: int) -> void:
 		var top := fy
 		var bot := fy - PIT_DEPTH
 		quad(M_PIT, Vector3(a.x, bot, a.z), Vector3(b.x, bot, b.z), Vector3(b.x, top, b.z), Vector3(a.x, top, a.z), n, 2, 3, cell,
-			func(p: Vector3) -> Vector2: return Vector2(p.x + p.z, p.y), aof)
+			_uv_wall(n), aof)
 
 
 func _shaft(x: int, z: int) -> void:
-	# вертикальная шахта над клеткой (под ямой верхнего слоя)
+	# вертикальная шахта над клеткой (под ямой верхнего слоя): стенки начинаются от потолка соседа
+	# (иначе под потолком соседней комнаты висит чёрная «полка») и стоят в плоскости стен под ними
 	var X0 := x * L.C
 	var Z0 := z * L.C
 	var cell := Vector2i(x, z)
-	var base := fy + 2.7
-	var aof := func(p: Vector3) -> float:
-		return clampf(1.0 - (p.y - base) / 4.0, 0.0, 1.0) * 0.7
 	for d in 4:
 		var o: Vector2i = L.DIRS[d]
 		var nh := D.height_m(x + o.x, z + o.y)
-		if nh <= 0.01 and D.flo[L.idx(x + o.x, z + o.y)] != L.F_SOLID:
+		var nsolid := D.flo[L.idx(x + o.x, z + o.y)] == L.F_SOLID
+		if nh <= 0.01 and not nsolid:
 			continue
+		var base := fy + (nh if (nh > 0.01 and not nsolid) else 2.7)
+		var inset := T if (L.edge_solid(D.edge(x, z, d)) or nsolid) else 0.0
 		var n := Vector3(-o.x, 0, -o.y)
 		var a: Vector3
 		var b: Vector3
 		match d:
 			0:
-				a = Vector3(X0 + L.C, 0, Z0)
-				b = Vector3(X0 + L.C, 0, Z0 + L.C)
+				a = Vector3(X0 + L.C - inset, 0, Z0)
+				b = Vector3(X0 + L.C - inset, 0, Z0 + L.C)
 			1:
-				a = Vector3(X0 + L.C, 0, Z0 + L.C)
-				b = Vector3(X0, 0, Z0 + L.C)
+				a = Vector3(X0 + L.C, 0, Z0 + L.C - inset)
+				b = Vector3(X0, 0, Z0 + L.C - inset)
 			2:
-				a = Vector3(X0, 0, Z0 + L.C)
-				b = Vector3(X0, 0, Z0)
+				a = Vector3(X0 + inset, 0, Z0 + L.C)
+				b = Vector3(X0 + inset, 0, Z0)
 			_:
-				a = Vector3(X0, 0, Z0)
-				b = Vector3(X0 + L.C, 0, Z0)
+				a = Vector3(X0, 0, Z0 + inset)
+				b = Vector3(X0 + L.C, 0, Z0 + inset)
+		var b0 := base
+		var aof := func(p: Vector3) -> float:
+			return clampf(1.0 - (p.y - b0) / 4.0, 0.0, 1.0) * 0.75
 		quad(M_PIT, Vector3(a.x, base, a.z), Vector3(b.x, base, b.z), Vector3(b.x, base + SHAFT_H, b.z), Vector3(a.x, base + SHAFT_H, a.z),
-			n, 2, 3, cell, func(p: Vector3) -> Vector2: return Vector2(p.x + p.z, p.y), aof)
+			n, 2, 3, cell, _uv_wall(n), aof)
 
 
 ## Рёбра на восток (d=0) и юг (d=1) клетки: стены, проёмы, окна
@@ -757,15 +844,18 @@ func _edges(x: int, z: int) -> void:
 			var t1: float = sp[1]
 			var y0: float = sp[2]
 			var y1: float = sp[3]
-			var a := mid + along * t0
-			var b := mid + along * t1
+			# грань стены заходит на 4 мм в соседнюю колонну/кусок: у них разные ряды вершин (Т-стык),
+			# и на высоких стенах (над ямами) в шве просвечивали волосяные щели; перекрытие копланарно и того же цвета
+			var a := mid + along * (t0 - 0.004)
+			var b := mid + along * (t1 + 0.004)
 			for side in 2:
 				var n := na if side == 0 else -na
 				var cell := ca if side == 0 else cb
 				var fside := fa if side == 0 else fb
-				if fside == L.F_SOLID:
-					continue
 				var zs := zone_a if side == 0 else zone_b
+				# сплошную сторону не видно — кроме пустоты «города» (Z_SKY): туда смотрят из окон, стена должна быть с обеих сторон
+				if fside == L.F_SOLID and zs != L.Z_SKY:
+					continue
 				var off := n * T
 				var p0 := Vector3(a.x, y0, a.z) + off
 				var p1 := Vector3(b.x, y0, b.z) + off
@@ -776,53 +866,57 @@ func _edges(x: int, z: int) -> void:
 				var flo_y := fy + (flr_a if side == 0 else flr_b)
 				var ceil_y := fy + (ha if side == 0 else hb)
 				var flat_side := flat_a if side == 0 else flat_b
+				# углы у пола/потолка — попиксельно; здесь только «глубина» ниже пола (стены ям и провалов)
 				var aof := func(p: Vector3) -> float:
-					var ao := 0.62 + 0.38 * smoothstep(flo_y - 0.05, flo_y + 0.7, p.y)
-					ao *= 0.8 + 0.2 * smoothstep(ceil_y + 0.05, ceil_y - 0.5, p.y)
 					if p.y < flo_y - 0.01:
-						ao *= clampf(1.0 + (p.y - flo_y) / 2.5, 0.0, 1.0)
-					return ao
-				var uvf: Callable
-				if d == 0:
-					uvf = func(p: Vector3) -> Vector2: return Vector2(p.z, p.y)
-				else:
-					uvf = func(p: Vector3) -> Vector2: return Vector2(p.x, p.y)
+						return clampf(1.0 + (p.y - flo_y) / 2.5, 0.0, 1.0)
+					return 1.0
+				var uvf := _uv_wall(n)
 				quad(_wall_mat(zs), p0, p1, p2, p3, n, 3, nv, cell, uvf, aof)
 				var bflip := zs == L.Z_FLIP
 				if _has_base(zs) and flat_side and ((not bflip and y0 <= flo_y + 0.01 and y1 > flo_y + 0.2) or (bflip and y1 >= ceil_y - 0.01)):
-					var bo := n * (T + 0.012)
 					var by := ceil_y - 0.1 if bflip else flo_y
-					var q0 := Vector3(a.x, by, a.z) + bo
-					var q1 := Vector3(b.x, by, b.z) + bo
-					quad(M_BASE, q0, q1, q1 + Vector3(0, 0.1, 0), q0 + Vector3(0, 0.1, 0), n, 2, 1, cell, uvf, func(_p: Vector3) -> float: return 0.8)
-					quad(M_BASE, q0 + Vector3(0, 0.1, 0), q1 + Vector3(0, 0.1, 0), q1 + Vector3(0, 0.1, 0) - n * 0.012, q0 + Vector3(0, 0.1, 0) - n * 0.012,
-						Vector3.UP, 1, 1, cell, uvf, func(_p: Vector3) -> float: return 0.9)
+					_baseboard(a + n * T, b + n * T, by, n, cell)
+				elif _has_base(zs) and not bflip and fside == L.F_FLOOR:
+					# стена вдоль пандуса (не лестницы): плинтус идёт по наклону пола
+					var ci2 := L.idx(cell.x, cell.y)
+					if D.ramp[ci2] != 0 and not D.is_stairs(ci2):
+						var sa := a + n * T
+						var sb := b + n * T
+						var ya := fy + D.floor_off_cell(cell.x, cell.y, sa.x, sa.z)
+						var yb := fy + D.floor_off_cell(cell.x, cell.y, sb.x, sb.z)
+						if y0 <= minf(ya, yb) + 0.01:
+							if absf(ya - yb) > 0.02:
+								_baseboard_slope(sa, sb, ya, yb, n, cell)
+							else:
+								_baseboard(sa, sb, ya, n, cell)
 			# торцы проёма (откосы) и низ перемычки
 			if ev == L.E_DOOR or ev == L.E_ARCH or ev == L.E_WINDOW:
 				var zs2 := zone_a if fa != L.F_SOLID else zone_b
 				var cellj := ca if fa != L.F_SOLID else cb
 				var wm := _wall_mat(zs2)
-				var uvj := func(p: Vector3) -> Vector2: return Vector2(p.x + p.z, p.y)
+				# горизонтальные грани проёма: u — вдоль стены, v — поперёк (а не вырожденная полоса)
+				var uvh := func(p: Vector3) -> Vector2: return Vector2(p.z, p.x) if d == 0 else Vector2(p.x, p.z)
 				if y0 > fe + 0.5:
 					# низ перемычки
 					var s0 := Vector3(a.x, y0, a.z) + na * T
 					var s1 := Vector3(b.x, y0, b.z) + na * T
-					quad(wm, s0, s1, s1 - na * 2.0 * T, s0 - na * 2.0 * T, Vector3.DOWN, 2, 1, cellj, uvj, func(_p: Vector3) -> float: return 0.85)
+					quad(wm, s0, s1, s1 - na * 2.0 * T, s0 - na * 2.0 * T, Vector3.DOWN, 2, 1, cellj, uvh, func(_p: Vector3) -> float: return 0.9)
 				elif ev == L.E_WINDOW and y1 < fe + 1.5 and y1 > fe:
 					var s0w := Vector3(a.x, y1, a.z) + na * T
 					var s1w := Vector3(b.x, y1, b.z) + na * T
-					quad(wm, s0w, s1w, s1w - na * 2.0 * T, s0w - na * 2.0 * T, Vector3.UP, 2, 1, cellj, uvj, func(_p: Vector3) -> float: return 0.9)
-				if ev == L.E_DOOR and absf(t0) < len_half - 0.01 and y0 <= fe + 0.01 and absf(t1 - t0) < len_half * 2.0 - 0.01:
-					# откос у внутреннего края куска (t1 или t0 — тот, что у проёма)
-					var tj := t1 if t1 < 0.0 else t0
-					var jn := along if t1 < 0.0 else -along
+					quad(wm, s0w, s1w, s1w - na * 2.0 * T, s0w - na * 2.0 * T, Vector3.UP, 2, 1, cellj, uvh, _one)
+				# откос у края куска, что смотрит в дверной проём (у левого куска — t1 = −DOOR_W, у правого — t0 = +DOOR_W)
+				var at_left := t1 < 0.0 and absf(t1 + DOOR_W) < 0.01
+				var at_right := t0 > 0.0 and absf(t0 - DOOR_W) < 0.01
+				if ev == L.E_DOOR and y0 <= fe + 0.01 and (at_left or at_right):
+					var tj := t1 if at_left else t0
+					var jn := along if at_left else -along
 					var j0 := mid + along * tj
 					var top := fe + DOOR_H if fy + H > fe + DOOR_H else fy + H
 					var a0 := Vector3(j0.x, fe, j0.z) + na * T
 					var a1 := Vector3(j0.x, fe, j0.z) - na * T
-					var fe0 := fe
-					quad(wm, a0, a1, a1 + Vector3(0, top - fe, 0), a0 + Vector3(0, top - fe, 0), jn, 1, 2, cellj, uvj,
-						func(p: Vector3) -> float: return 0.7 + 0.3 * smoothstep(fe0, fe0 + 0.6, p.y))
+					quad(wm, a0, a1, a1 + Vector3(0, top - fe, 0), a0 + Vector3(0, top - fe, 0), jn, 1, 2, cellj, _uv_wall(jn), _one)
 			# коллизия куска
 			var cpos := (a + b) * 0.5
 			var halfv := Vector3(T, (y1 - y0) * 0.5, absf(b.z - a.z) * 0.5 + T) if d == 0 else Vector3(absf(b.x - a.x) * 0.5 + T, (y1 - y0) * 0.5, T)
@@ -831,8 +925,7 @@ func _edges(x: int, z: int) -> void:
 			# стекло
 			var g0 := Vector3(e0.x, fe + 0.9, e0.z)
 			var g1 := Vector3(e1.x, fe + 0.9, e1.z)
-			var gq := func(p: Vector3) -> Vector2: return Vector2(p.x + p.z, p.y)
-			quad(M_GLASS, g0, g1, g1 + Vector3(0, 1.3, 0), g0 + Vector3(0, 1.3, 0), na, 1, 1, ca, gq, func(_p: Vector3) -> float: return 1.0)
+			quad(M_GLASS, g0, g1, g1 + Vector3(0, 1.3, 0), g0 + Vector3(0, 1.3, 0), na, 1, 1, ca, _uv_wall(na), _one)
 			boxes.append([Vector3(mid.x, fe + 1.55, mid.z), Vector3(T if d == 0 else len_half, 0.65, T if d == 1 else len_half)])
 
 
@@ -870,34 +963,69 @@ func _post(x: int, z: int) -> void:
 	var pz := z * L.C
 	var y0 := lo
 	var y1 := fy + H
+	# грань колонны освещается и окрашивается по клетке, в которую смотрит (с той же стороны, что и соседняя стена)
 	var faces := [
-		[Vector3(1, 0, 0), e_e == L.E_WALL, Vector2i(x, z)],
-		[Vector3(-1, 0, 0), e_w == L.E_WALL, Vector2i(x - 1, z - 1)],
-		[Vector3(0, 0, 1), e_s == L.E_WALL, Vector2i(x, z)],
-		[Vector3(0, 0, -1), e_n == L.E_WALL, Vector2i(x - 1, z - 1)],
+		[Vector3(1, 0, 0), e_e == L.E_WALL, Vector2i(x, z), Vector2i(x, z - 1)],
+		[Vector3(-1, 0, 0), e_w == L.E_WALL, Vector2i(x - 1, z - 1), Vector2i(x - 1, z)],
+		[Vector3(0, 0, 1), e_s == L.E_WALL, Vector2i(x, z), Vector2i(x - 1, z)],
+		[Vector3(0, 0, -1), e_n == L.E_WALL, Vector2i(x - 1, z - 1), Vector2i(x, z - 1)],
 	]
-	var wm := _wall_mat(zn)
 	for f in faces:
 		var n: Vector3 = f[0]
 		if f[1]:
 			continue
 		var cell: Vector2i = f[2]
-		if D.flo[L.idx(cell.x, cell.y)] == L.F_SOLID:
-			continue
+		if D.flo[L.idx(cell.x, cell.y)] == L.F_SOLID and D.zone[L.idx(cell.x, cell.y)] != L.Z_SKY:
+			cell = f[3]
+			if D.flo[L.idx(cell.x, cell.y)] == L.F_SOLID and D.zone[L.idx(cell.x, cell.y)] != L.Z_SKY:
+				continue
+		var ci := L.idx(cell.x, cell.y)
+		var zf := D.zone[ci]
 		var t := Vector3(-n.z, 0, n.x)
 		var c := Vector3(px, 0, pz) + n * hw
 		var a := c - t * hw
 		var b := c + t * hw
 		var flo_y := fy + D.floor_off_cell(cell.x, cell.y, x * L.C, z * L.C)
-		quad(wm, Vector3(a.x, y0, a.z), Vector3(b.x, y0, b.z), Vector3(b.x, y1, b.z), Vector3(a.x, y1, a.z), n, 1, 3, cell,
-			func(p: Vector3) -> Vector2: return Vector2(p.x + p.z, p.y),
-			func(p: Vector3) -> float: return (0.6 + 0.4 * smoothstep(flo_y, flo_y + 0.7, p.y)) * clampf(1.0 - (flo_y - p.y) / 5.0, 0.1, 1.0))
-		if _has_base(zn) and pil:
-			var bo := n * 0.012
-			var fb2 := fy + D.floor_off_cell(cell.x, cell.y, x * L.C, z * L.C)
-			quad(M_BASE, Vector3(a.x, fb2, a.z) + bo, Vector3(b.x, fb2, b.z) + bo, Vector3(b.x, fb2 + 0.1, b.z) + bo, Vector3(a.x, fb2 + 0.1, a.z) + bo,
-				n, 1, 1, cell, func(p: Vector3) -> Vector2: return Vector2(p.x + p.z, p.y), func(_p: Vector3) -> float: return 0.8)
+		quad(_wall_mat(zf), Vector3(a.x, y0, a.z), Vector3(b.x, y0, b.z), Vector3(b.x, y1, b.z), Vector3(a.x, y1, a.z), n, 1, 3, cell,
+			_uv_wall(n),
+			func(p: Vector3) -> float: return clampf(1.0 - (flo_y - p.y) / 2.5, 0.0, 1.0) if p.y < flo_y - 0.01 else 1.0)
+		# плинтус на всех открытых гранях: без него на каждом стыке стен (каждые 2.4 м) — дыра 20 см
+		if _has_base(zf) and D.ramp[ci] == 0 and D.flo[ci] == L.F_FLOOR and zf != L.Z_FLIP:
+			_baseboard(a, b, flo_y, n, cell)
 	boxes.append([Vector3(px, (y0 + y1) * 0.5, pz), Vector3(hw, (y1 - y0) * 0.5, hw)])
+
+
+## Наклонный плинтус вдоль пандуса: низ идёт по полу от ya (у a) до yb (у b)
+func _baseboard_slope(a: Vector3, b: Vector3, ya: float, yb: float, n: Vector3, cell: Vector2i) -> void:
+	var bo := n * 0.012
+	var q0 := Vector3(a.x, ya, a.z) + bo
+	var q1 := Vector3(b.x, yb, b.z) + bo
+	var up := Vector3(0, 0.1, 0)
+	var axis_z := absf(n.x) > 0.5
+	var la := a.distance_to(b)
+	# v — от кромки вниз по планке, по месту вдоль: верх планки идёт параллельно полу
+	var uvb := func(p: Vector3) -> Vector2:
+		var tq := clampf(Vector2(p.x - a.x, p.z - a.z).length() / maxf(la, 0.001), 0.0, 1.0)
+		var top := lerpf(ya, yb, tq) + 0.1
+		return Vector2(p.z if axis_z else p.x, top - p.y)
+	quad(M_BASE, q0, q1, q1 + up, q0 + up, n, 4, 1, cell, uvb, _one)
+	var uvc := func(p: Vector3) -> Vector2: return Vector2(p.z if axis_z else p.x, 0.002)
+	quad(M_BASE, q0 + up, q1 + up, q1 + up - bo, q0 + up - bo, Vector3.UP, 4, 1, cell, uvc, _one)
+
+
+## Плинтус вдоль отрезка a..b (точки на поверхности стены), высотой 10 см, на 12 мм от стены, с верхней кромкой
+func _baseboard(a: Vector3, b: Vector3, by: float, n: Vector3, cell: Vector2i) -> void:
+	var bo := n * 0.012
+	var q0 := Vector3(a.x, by, a.z) + bo
+	var q1 := Vector3(b.x, by, b.z) + bo
+	var top := by + 0.1
+	var axis_z := absf(n.x) > 0.5
+	# u — вдоль стены, v — сверху вниз по планке (0 — кромка, 1 — у пола): текстура-полоса 1.0×0.1 м
+	var uvb := func(p: Vector3) -> Vector2: return Vector2(p.z if axis_z else p.x, top - p.y)
+	quad(M_BASE, q0, q1, q1 + Vector3(0, 0.1, 0), q0 + Vector3(0, 0.1, 0), n, 2, 1, cell, uvb, _one)
+	var uvc := func(p: Vector3) -> Vector2: return Vector2(p.z if axis_z else p.x, 0.002)
+	quad(M_BASE, q0 + Vector3(0, 0.1, 0), q1 + Vector3(0, 0.1, 0), q1 + Vector3(0, 0.1, 0) - bo, q0 + Vector3(0, 0.1, 0) - bo,
+		Vector3.UP, 1, 1, cell, uvc, _one)
 
 
 func _floor_collision() -> void:

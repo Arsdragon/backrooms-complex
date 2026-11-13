@@ -14,6 +14,8 @@ var phase := 0.0
 var anim_speed := 1.0
 var react := false
 var breathe := 0.0
+var push := false           # идёт, толкая коляску (руки на ручке, не машут); само включается, если у узла есть коляска
+var _push_checked := false
 var look_target: Node3D = null
 var _head_rest := Quaternion()
 var _t := 0.0
@@ -30,11 +32,12 @@ var _hands := {}                # "l"/"r" -> узел для предметов 
 var _root_bone := -1
 var _drive_t := 0.0
 
-## кто в игре -> аватар Rocketbox (humans/<id>/Export/<id>.fbx)
+## кто в игре -> аватар Rocketbox (humans/<id>/Export/<id>.fbx). civ_b (женщина пары на пледе в парке) —
+## розовая кофта и джинсы: у Female_Adult_10 чёрный балахон с капюшоном читался как монашка/призрак
 const CAST := {"jogger": "Sports_Male_04", "mother": "Female_Adult_02", "kid": "Male_Child_01", "oldman": "Male_Adult_03",
 	"couple": "Male_Adult_06", "suit": "Business_Male_02", "vendor": "Chef_Female_01", "teen": "Male_Adult_09",
 	"worker": "Business_Male_06", "explorer": "Fire_Male_01", "player": "Male_Adult_05", "civ_a": "Female_Adult_04",
-	"civ_b": "Female_Adult_10", "civ_c": "Female_Adult_12", "civ_d": "Male_Adult_01",
+	"civ_b": "Female_Adult_01", "civ_c": "Female_Adult_12", "civ_d": "Male_Adult_01",
 	"civ_e": "Business_Female_01", "civ_f": "Female_Adult_01", "civ_g": "Female_Adult_06", "civ_h": "Male_Adult_13",
 	"civ_i": "Male_Adult_16", "civ_j": "Medical_Male_01", "civ_k": "Police_Male_01", "civ_l": "Female_Child_01",
 	"civ_m": "Male_Child_02", "civ_n": "Gardener_Male_01", "civ_o": "Security_Male_01", "civ_p": "Male_Adult_14"}
@@ -54,6 +57,9 @@ const JPARENT := {"pelvis": "", "spine": "pelvis", "chest": "spine", "neck": "ch
 	"hip_l": "pelvis", "kn_l": "hip_l", "an_l": "kn_l", "hip_r": "pelvis", "kn_r": "hip_r", "an_r": "kn_r"}
 
 const SKIN := [Color(0.84, 0.69, 0.58), Color(0.72, 0.54, 0.42), Color(0.55, 0.38, 0.28), Color(0.9, 0.76, 0.66)]
+## Карты нормалей Rocketbox (*_normal.tga, скачиваются fetch_humans.py --normals) сделаны в 3ds Max — DirectX
+## (зелёный «вниз по картинке»), это и есть соглашение prop-шейдера: y не переворачивать
+const NMAP_GL := 0.0
 
 
 static func outfit(w: String, rng: RandomNumberGenerator) -> Dictionary:
@@ -152,24 +158,46 @@ func _build_model(path: String, rng: RandomNumberGenerator) -> void:
 	root.add_child(inst)
 	sk = _find_skel(inst)
 	var tex_dir := path.get_base_dir().get_base_dir() + "/Textures/"
+	# у части копий лицо «смазано»: текстура головы размыта в шейдере (face_smear) — по форме головы, без наклеек
+	var smeared := copy and rng.randf() < 0.55
 	for mi in _meshes(inst):
 		var m := mi as MeshInstance3D
 		parts.append(m)
+		var heads := {}
 		if m.mesh != null:
 			for i in m.mesh.get_surface_count():
 				var bm := m.get_active_material(i) as BaseMaterial3D
-				if bm != null and bm.albedo_texture == null:
-					var want := "head" if bm.resource_name.to_lower().contains("head") else "body"
+				if bm == null:
+					continue
+				var want := "head" if bm.resource_name.to_lower().contains("head") else "body"
+				heads[i] = want == "head"
+				if bm.albedo_texture == null:
 					var tx := _find_tex(tex_dir, want)
 					if tx != null:
 						var nm2 := bm.duplicate() as BaseMaterial3D
 						nm2.albedo_texture = tx
 						nm2.albedo_color = Color(1, 1, 1)
+						# карта нормалей Rocketbox (<id>_<часть>_normal.tga), если скачана: складки одежды, черты лица
+						var nt := _find_tex(tex_dir, want, "normal")
+						if nt != null and not copy:
+							nm2.normal_enabled = true
+							nm2.normal_texture = nt
 						m.set_surface_override_material(i, nm2)
 		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if copy else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		if copy and m.mesh != null:
 			for i in m.mesh.get_surface_count():
-				m.set_surface_override_material(i, Models.complex_mat(m.get_active_material(i), {"pale": 0.5, "smear": 1.0}))
+				var head: bool = heads.get(i, false)
+				# копия — человек из парка, только «не тот»: одежда своего цвета и рисунка, но выцветшая пятнами
+				# и чуть белёсая; черты лица у части смазаны (face_smear)
+				var ex := {"pale": 0.1, "wash": 0.55, "smear": 1.0}
+				if head and smeared:
+					ex["face_smear"] = 1.0
+				var nt2 := _find_tex(tex_dir, "head" if head else "body", "normal")
+				if nt2 != null:
+					ex["nmap"] = nt2
+					ex["bump"] = 0.8
+					ex["nmap_gl"] = NMAP_GL
+				m.set_surface_override_material(i, Models.complex_mat(m.get_active_material(i), ex))
 	# суставы-посредники (вне видимой иерархии), как у примитивного человека
 	var px := Node3D.new()
 	px.name = "_px"
@@ -225,33 +253,15 @@ func _build_model(path: String, rng: RandomNumberGenerator) -> void:
 		fr.basis = (o * _arest[hb]).inverse()
 		ba.add_child(fr)
 		_hands[side] = fr
-	# «смазанное» лицо поверх головы у части копий
-	if copy and rng.randf() < 0.55 and bidx.has("Bip01 Head"):
-		var hb2: int = bidx["Bip01 Head"]
-		var ba2 := BoneAttachment3D.new()
-		ba2.bone_idx = hb2
-		sk.add_child(ba2)
-		var fr2 := Node3D.new()
-		fr2.basis = (_arest[hb2] as Basis).inverse()
-		ba2.add_child(fr2)
-		var fq := QuadMesh.new()
-		fq.size = Vector2(0.16, 0.21)
-		var face := MeshInstance3D.new()
-		face.mesh = fq
-		face.material_override = Mats.prop("face_face_smear_m", {"tex": "face_smear", "tex_mix": 1.0, "alpha_cut": 0.4, "pale": 0.35, "smear": 0.8})
-		face.position = Vector3(0, 0.075, 0.125)
-		face.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		fr2.add_child(face)
-		parts.append(face)
 	pose("stand")
 	_drive()
 
 
-static func _find_tex(dir: String, part: String) -> Texture2D:
+static func _find_tex(dir: String, part: String, kind := "color") -> Texture2D:
 	var files: PackedStringArray = ResourceLoader.list_directory(dir) if ResourceLoader.has_method("list_directory") else DirAccess.get_files_at(dir)
 	for f in files:
 		var fn := String(f).trim_suffix(".import")
-		if fn.contains(part) and fn.contains("color") and fn.get_extension() in ["tga", "png", "jpg"]:
+		if fn.contains(part) and fn.contains(kind) and fn.get_extension() in ["tga", "png", "jpg"]:
 			return load(dir + fn)
 	return null
 
@@ -387,8 +397,7 @@ func hand(side: String) -> Node3D:
 func _mat(c: Color, kind := "fabric") -> Material:
 	var tname := "fabric" if kind == "fabric" else "noise"
 	if copy:
-		var pale := 0.45
-		return Mats.col(c, tname, 0.5 if kind == "fabric" else 0.12, {"pale": pale, "smear": 1.0})
+		return Mats.col(c, tname, 0.5 if kind == "fabric" else 0.12, {"pale": 0.1, "wash": 0.55, "smear": 1.0})
 	var m := StandardMaterial3D.new()
 	m.albedo_color = c
 	if kind == "fabric":
@@ -750,6 +759,18 @@ func _tick(dt: float) -> void:
 	if pose_name == "walk" or pose_name == "run":
 		phase += dt * anim_speed * (5.2 if pose_name == "walk" else 9.0)
 		pose(pose_name, phase)
+		if not _push_checked:
+			_push_checked = true
+			for ch in get_children():
+				if ch.has_meta("stroller"):
+					push = true
+		if push:
+			# обе руки вперёд-вниз на ручке коляски, локти чуть согнуты; корпус немного наклонён
+			_r("sh_l", -0.5, 0.0, -0.12)
+			_r("sh_r", -0.5, 0.0, 0.12)
+			_r("el_l", -0.5)
+			_r("el_r", -0.5)
+			_r("spine", 0.12)
 		return
 	if breathe > 0.0:
 		var s := 1.0 + sin(_t * 1.6) * 0.02 * breathe

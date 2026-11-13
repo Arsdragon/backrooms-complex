@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://c2hfm8v63e0he"
-path.s3tc="res://.godot/imported/graf_g08_ru.png-a7e77373cc0efd27cb578493d2746b35.s3tc.ctex"
+path.bptc="res://.godot/imported/graf_g08_ru.png-a7e77373cc0efd27cb578493d2746b35.bptc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -12,12 +12,12 @@ metadata={
 [deps]
 
 source_file="res://tex/graf_g08_ru.png"
-dest_files=["res://.godot/imported/graf_g08_ru.png-a7e77373cc0efd27cb578493d2746b35.s3tc.ctex"]
+dest_files=["res://.godot/imported/graf_g08_ru.png-a7e77373cc0efd27cb578493d2746b35.bptc.ctex"]
 
 [params]
 
 compress/mode=2
-compress/high_quality=false
+compress/high_quality=true
 compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0

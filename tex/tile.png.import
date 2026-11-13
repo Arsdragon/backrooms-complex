@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://b52587nryf3k"
-path.s3tc="res://.godot/imported/tile.png-4ad0ae78c9eb50c3e960335d6f3db703.s3tc.ctex"
+path.bptc="res://.godot/imported/tile.png-4ad0ae78c9eb50c3e960335d6f3db703.bptc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -12,12 +12,12 @@ metadata={
 [deps]
 
 source_file="res://tex/tile.png"
-dest_files=["res://.godot/imported/tile.png-4ad0ae78c9eb50c3e960335d6f3db703.s3tc.ctex"]
+dest_files=["res://.godot/imported/tile.png-4ad0ae78c9eb50c3e960335d6f3db703.bptc.ctex"]
 
 [params]
 
 compress/mode=2
-compress/high_quality=false
+compress/high_quality=true
 compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0

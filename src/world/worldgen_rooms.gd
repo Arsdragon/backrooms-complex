@@ -134,6 +134,10 @@ static func call_room(t: String, L: LayerData, x: int, z: int, w: int, h: int, l
 
 # ------------------------------------------------------------ помощники
 
+## Масштаб potted_plant_04 (у модели 27 см — настольный цветок): напольный фикус ~0,95 м
+const PLANT_S := 3.5
+
+
 static func _c(L: LayerData, x: int, z: int) -> Vector3:
 	var c := LD.cell_center(x, z)
 	return Vector3(c.x, L.floor_y, c.y)
@@ -163,8 +167,12 @@ static func _graf(L: LayerData, x: int, z: int, side: int, key: String, y := 1.4
 	L.add_deco({"k": "graf", "key": key, "p": L.wall_point(x, z, side, 0.0) + Vector3(0, y, 0), "r": LD.dir_yaw(side), "along": along})
 
 
-static func _model(L: LayerData, id: String, p: Vector3, r: float, s: Variant = 1.0, collide := true, y := 0.0) -> void:
-	L.add_deco({"k": "model", "id": id, "p": p, "r": r, "s": s, "collide": collide, "y": y})
+## Модель в мир. ex — доп. ключи описания: "on": [id опоры, масштаб опоры по y] — поставить на верх опоры
+## (p — на полу под ней), "ground": true — низом на пол, "price": "…" — ценник на стойке рядом
+static func _model(L: LayerData, id: String, p: Vector3, r: float, s: Variant = 1.0, collide := true, y := 0.0, ex := {}) -> void:
+	var d := {"k": "model", "id": id, "p": p, "r": r, "s": s, "collide": collide, "y": y}
+	d.merge(ex)
+	L.add_deco(d)
 
 
 # ------------------------------------------------------------ комнаты
@@ -289,6 +297,7 @@ static func doors(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 					continue
 				L.add_deco({"k": "door", "kind": "small" if L.rng.randf() < 0.15 else "wall", "p": L.wall_point(cx, cz, side, 0.0, L.rng.randf_range(-0.4, 0.4)), "r": LD.dir_yaw(side)})
 	L.add_deco({"k": "door", "kind": "ceiling", "p": _c(L, x + w / 2, z + h / 2), "r": 0.0})
+	_late_light(L, x + w / 2, z + h / 2, LD.L_NONE)
 	_graf(L, x + 1, z, 3, "graf.doors", 1.95)
 
 
@@ -399,14 +408,15 @@ static func store(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 		for j in range(1, h - 1, 2):
 			var p := _c(L, x + i, z + j) + Vector3(L.rng.randf_range(-0.3, 0.3), 0, L.rng.randf_range(-0.3, 0.3))
 			var id: String = goods[L.rng.randi_range(0, goods.size() - 1)]
-			_model(L, id, p, L.rng.randf_range(-0.3, 0.3) + (PI if j % 4 == 1 else 0.0))
-			L.add_deco({"k": "price", "p": p + Vector3(0.35, 0.95, 0.35), "r": L.rng.randf() * TAU, "text": "$%d.99" % L.rng.randi_range(19, 399)})
+			var yaw := L.rng.randf_range(-0.3, 0.3) + (PI if j % 4 == 1 else 0.0)
+			L.rng.randf()
+			_model(L, id, p, yaw, 1.0, true, 0.0, {"price": "$%d.99" % L.rng.randi_range(19, 399)})
 			if (i + j) % 4 == 2:
 				L.add_deco({"k": "store_sign", "p": p + Vector3(0, 0, 0.0), "r": L.rng.randf_range(-0.2, 0.2) + (PI * 0.5 if si % 2 else 0.0), "key": signs[si % signs.size()], "v": si})
 				si += 1
 	var cc := _c(L, x + w - 2, z + 1)
 	_model(L, "metal_office_desk", cc, 0.0, Vector3(0.8, 1.2, 0.7))
-	_model(L, "CashRegister_01", cc + Vector3(0, 0.95, 0), PI, 1.0, false)
+	_model(L, "CashRegister_01", cc, PI, 1.0, false, 0.0, {"on": ["metal_office_desk", 1.2]})
 	L.add_deco({"k": "sound", "snd": "store_muzak", "p": _mid(L, x, z, w, h) + Vector3(0, 2.3, 0), "every": 0.0})
 	L.add_deco({"k": "copy", "who": "civ_g", "wrong": "corner", "p": L.wall_point(x, z + h - 1, 2, 0.35), "r": LD.dir_yaw(2) + PI, "seed": L.rng.randi()})
 
@@ -561,11 +571,20 @@ static func body(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 static func speakers(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 	L.stamp_room(x, z, w, h, LD.Z_DARK, 2, LD.E_DOOR)
 	_lights(L, x, z, w, h, LD.L_RED)
+	# у каждой красной лампы — светильник: основание на потолке, колба в клетке
+	for i in w:
+		for j in h:
+			if L.light[LD.idx(x + i, z + j)] == LD.L_RED:
+				L.add_deco({"k": "red_lamp", "p": _c(L, x + i, z + j), "r": 0.0})
 	var m := _mid(L, x, z, w, h)
 	for k in 7:
 		var a := k * TAU / 7.0
 		var p := m + Vector3(cos(a) * 3.6, 0, sin(a) * 3.6)
-		L.add_deco({"k": "speaker", "p": p, "r": atan2(-cos(a), -sin(a)) + PI, "seed": L.rng.randi()})
+		# лицом (динамиками) — к середине комнаты, где стоит слушающий
+		L.add_deco({"k": "speaker", "p": p, "r": atan2(-cos(a), -sin(a)), "seed": L.rng.randi()})
+	# в середине — усилитель с магнитофоном, к нему сходятся шнуры колонок
+	# (без вызовов L.rng: порядок случайных чисел генерации мира не меняется)
+	L.add_deco({"k": "speaker_hub", "p": m, "r": 0.6})
 
 
 ## Бассейный зал: белая плитка, вода по щиколотку, колонны
@@ -890,6 +909,8 @@ static func holes(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 		L.light[ci] = LD.L_NONE
 		if L.rng.randf() < 0.5:
 			L.add_deco({"k": "tile_fallen", "p": _cf(L, x + i, z + j) + Vector3(0, 0.0, 0), "r": L.rng.randf() * TAU})
+			# плита упала с потолка над дырой — там тёмный проём
+			_late_light(L, x + i, z + j, LD.L_HOLE)
 		made += 1
 	_graf(L, x, z + h / 2, 2, "graf.mind_gap", 1.4)
 	_entry(L, x + w / 2, z + 0)
@@ -1030,6 +1051,30 @@ static func sprinkle_holes(L: LayerData, lay: int, origin: Vector2i) -> void:
 		made += 1
 
 
+## Свет клетки, который ставится только в конце генерации слоя (finish_lights): place_lights, _scatter
+## и sprinkle смотрят на свет клеток и тянут L.rng — поменяй его раньше, и сдвинулся бы весь мир сида
+static func _late_light(L: LayerData, x: int, z: int, k: int) -> void:
+	var lst: Array = L.get_meta("late_light", [])
+	lst.append([LD.idx(x, z), k])
+	L.set_meta("late_light", lst)
+
+
+## Конец генерации слоя: отложенный свет клеток (двери в потолке — без светильника, плиты над дырами), и над
+## упавшими у провалов плитами в потолке — тёмный проём (L_HOLE), а не целый потолок (клетки — места hole_<k>,
+## туда sprinkle_holes кладёт tile_fallen)
+static func finish_lights(L: LayerData) -> void:
+	for e in L.get_meta("late_light", []):
+		var a: Array = e
+		L.light[int(a[0])] = int(a[1])
+	L.remove_meta("late_light")
+	for key in L.places.keys():
+		var ks := String(key)
+		if not ks.begins_with("hole_") or ks.ends_with("_c"):
+			continue
+		var p: Vector3 = L.places[key]
+		L.light[LD.idx(int(floor(p.x / LD.C)), int(floor(p.z / LD.C)))] = LD.L_HOLE
+
+
 ## Находки по миру — понемногу: сотрудники Async в химзащите (чаще в тупиках), чужие вещи, камера на штативе,
 ## следы волочения в стену, дверь посреди зала, брошенная ночёвка
 static func sprinkle_finds(L: LayerData, lay: int, origin: Vector2i) -> void:
@@ -1057,7 +1102,8 @@ static func sprinkle_finds(L: LayerData, lay: int, origin: Vector2i) -> void:
 						continue
 					var sd: int = sides[0]
 					var wp := L.wall_point(cx, cz, sd, 0.35)
-					var d := {"k": "hazmat", "p": wp, "r": LD.dir_yaw(sd) + PI, "seed": L.rng.randi(), "pose": "slump" if L.rng.randf() < 0.6 else "lie"}
+					# лицом в зал, спиной к стене (−z узла смотрит в стену): сидящий виден целиком, а не ногами вдоль стены
+					var d := {"k": "hazmat", "p": wp, "r": LD.dir_yaw(sd), "seed": L.rng.randi(), "pose": "slump" if L.rng.randf() < 0.6 else "lie"}
 					if made < 2:
 						d["note"] = true
 						d["key"] = notes[note_i % notes.size()]
@@ -1105,10 +1151,10 @@ static func waiting(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 	var cxw := x + w / 2
 	L.add_deco({"k": "tv_on", "p": _wall(L, cxw, z, 3, 0.0, 0.45), "r": LD.dir_yaw(3), "ch": "static" if L.rng.randf() < 0.5 else "news"})
 	L.add_deco({"k": "text", "key": "sign.ticket", "p": _wall(L, cxw - 2, z, 3, 2.15), "r": LD.dir_yaw(3), "color": Color(1.0, 0.18, 0.08),
-		"px": 0.0045, "plate": true, "plate_size": Vector2(0.95, 0.42)})
+		"px": 0.0032, "plate": true, "plate_size": Vector2(0.95, 0.42), "glow": 1.3})
 	L.add_deco({"k": "chairs", "p": _mid(L, x, z, w, h) + Vector3(0, 0, 1.2), "r": LD.dir_yaw(3), "cols": 6, "rows": 3})
 	L.add_deco({"k": "obj", "what": "cooler", "p": _wall(L, x, z + h - 1, 2, 0.0, 0.4), "r": LD.dir_yaw(2), "wrong": "none"})
-	_model(L, "potted_plant_04", _wall(L, x + w - 1, z, 0, 0.0, 0.4), 0.0)
+	_model(L, "potted_plant_04", _wall(L, x + w - 1, z, 0, 0.0, 0.4), 0.0, PLANT_S)
 	_model(L, "wall_clock", _wall(L, x + w - 1, z + h / 2, 0, 2.1), LD.dir_yaw(0), 1.0, false)
 	L.add_deco({"k": "sound", "p": _wall(L, x + w - 1, z + h / 2, 0, 2.0), "snd": "clock_tick", "every": 0.0, "vol": -14.0, "max_dist": 10.0})
 	if L.rng.randf() < 0.6:
@@ -1128,7 +1174,8 @@ static func lounge(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 		_model(L, "modern_coffee_table_01" if k == 0 else "CoffeeTable_01", c, 0.0)
 		_model(L, "ArmChair_01" if k == 0 else "modern_arm_chair_01", c + Vector3(1.4, 0, 0.3), -PI * 0.5)
 	for corner in [Vector2i(x, z), Vector2i(x + w - 1, z + h - 1)]:
-		_model(L, "potted_plant_04", _c(L, corner.x, corner.y), L.rng.randf() * TAU)
+		var into := Vector3(-0.55, 0, -0.55) if corner.x == x else Vector3(0.55, 0, 0.55)
+		_model(L, "potted_plant_04", _c(L, corner.x, corner.y) + into, L.rng.randf() * TAU, PLANT_S)
 	for k in 2:
 		L.add_deco({"k": "spin", "id": "ceiling_fan", "p": m + Vector3(-2.6 + k * 5.2, 0, 0), "r": 0.0, "speed": 1.6 + k * 0.4, "on_ceiling": true})
 	_model(L, "hanging_picture_frame_01", _wall(L, x + w / 2, z, 3, 1.6), LD.dir_yaw(3), 1.0, false)
@@ -1146,8 +1193,15 @@ static func party(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 	for k in 6:
 		var a := k * TAU / 6.0
 		_model(L, "plastic_monobloc_chair_01", m + Vector3(cos(a) * 1.25, 0, sin(a) * 1.25), -a - PI * 0.5, 0.85)
+	# гелиевые шарики упёрлись в потолок, ленточки висят
 	for k in 6:
-		L.add_deco({"k": "obj", "what": "balloon", "p": _c(L, x + L.rng.randi_range(0, w - 1), z + L.rng.randi_range(0, h - 1)), "r": 0.0, "wrong": "none"})
+		var bx := x + L.rng.randi_range(0, w - 1)
+		var bz := z + L.rng.randi_range(0, h - 1)
+		# разброс — своим генератором, чтобы не сдвигать общий (раскладка мира по сиду та же)
+		var hr := RandomNumberGenerator.new()
+		hr.seed = hash(Vector3i(bx, bz, k))
+		var bp := _c(L, bx, bz) + Vector3(hr.randf_range(-0.6, 0.6), L.height_m(bx, bz) - 0.01, hr.randf_range(-0.6, 0.6))
+		L.add_deco({"k": "obj", "what": "balloon", "p": bp, "r": hr.randf() * TAU, "wrong": "none"})
 	L.add_deco({"k": "text", "key": "sign.party", "p": _wall(L, x + w / 2, z, 3, 2.05), "r": LD.dir_yaw(3), "color": Color(0.85, 0.15, 0.35),
 		"px": 0.0055, "hand": true})
 	_model(L, "boombox", _wall(L, x, z + h / 2, 2, 0.0, 0.3), LD.dir_yaw(2), 1.0, false)
@@ -1162,15 +1216,16 @@ static func conference(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 	_lights(L, x, z, w, h, LD.L_DEAD)
 	L.light[LD.idx(x + w - 2, z + h / 2)] = LD.L_FLICK
 	var m := _mid(L, x, z, w, h)
+	var tsy := 0.86
 	for k in 2:
-		_model(L, "dining_table", m + Vector3(-1.1 + k * 2.2, 0, 0), PI * 0.5)
+		_model(L, "dining_table", m + Vector3(-1.1 + k * 2.2, 0, 0), PI * 0.5, Vector3(1.0, tsy, 1.0))
 	for k in 4:
 		for sd in [-1.0, 1.0]:
 			_model(L, "dining_chair_02", m + Vector3(-2.4 + k * 1.6, 0, 0.85 * sd), PI if sd > 0.0 else 0.0)
-	# проектор смотрит на западную стену; квадрат света — на ней
-	L.add_deco({"k": "projector", "p": m + Vector3(1.8, 0, 0), "r": LD.dir_yaw(2), "dist": w * 0.5 * LD.C + 1.8 - 0.13})
-	_model(L, "classic_laptop", m + Vector3(-0.5, 0.78, 0.1), 0.6, 1.0, false)
-	_model(L, "clipboard", m + Vector3(0.6, 0.78, -0.2), 1.2, 1.0, false)
+	# проектор на краю стола смотрит на западную стену; кадр — на ней
+	L.add_deco({"k": "projector", "p": m + Vector3(1.45, 0, 0), "r": LD.dir_yaw(2), "dist": w * 0.5 * LD.C + 1.45 - 0.13, "on": ["dining_table", tsy]})
+	_model(L, "classic_laptop", m + Vector3(-0.5, 0, 0.1), 0.6, 0.55, false, 0.0, {"on": ["dining_table", tsy]})
+	_model(L, "clipboard", m + Vector3(0.6, 0, -0.2), 1.2, 1.0, false, 0.0, {"on": ["dining_table", tsy]})
 	_model(L, "plastic_bottle_gallon", _wall(L, x + w - 1, z, 0, 0.0, 0.4), 0.0)
 
 
@@ -1187,7 +1242,7 @@ static func archive(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 		L.add_deco({"k": "papers", "p": _c(L, x + L.rng.randi_range(0, w - 1), z + L.rng.randi_range(0, h - 1)), "r": L.rng.randf() * TAU})
 	_model(L, "drawer_cabinet", _wall(L, x, z, 3, 0.0, 0.35), LD.dir_yaw(3))
 	L.add_deco({"k": "obj", "what": "desk", "p": _wall(L, x + w - 1, z + h - 1, 1, 0.0, 0.5), "r": LD.dir_yaw(1), "wrong": "none"})
-	_model(L, "office_notepads", _wall(L, x + w - 1, z + h - 1, 1, 0.76, 0.6), 0.3, 1.0, false)
+	_model(L, "office_notepads", _wall(L, x + w - 1, z + h - 1, 1, 0.0, 0.6), 0.3, 0.4, false, 0.0, {"on": ["metal_office_desk", 1.0]})
 
 
 ## Лифтовой холл: три лифта, кнопка вызова горит; лифт иногда звенит, но двери не открываются
@@ -1200,7 +1255,7 @@ static func elevators(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 		var ex := x + 1 + k * 2 if w >= 6 else x + k
 		L.add_deco({"k": "elevator", "p": _wall(L, ex, z, 3, 0.0), "r": LD.dir_yaw(3), "seed": L.rng.randi()})
 	_model(L, "modular_street_seating", _wall(L, x + w / 2, z + h - 1, 1, 0.0, 0.5), LD.dir_yaw(1))
-	_model(L, "potted_plant_04", _c(L, x, z + h - 1), 0.0)
+	_model(L, "potted_plant_04", _c(L, x, z + h - 1) + Vector3(-0.6, 0, 0.6), 0.0, PLANT_S)
 
 
 ## Манекены: белые фигуры стоят лицом к стенам. Одна — нет
@@ -1232,9 +1287,11 @@ static func kitchen(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 	_model(L, "electric_stove", _wall(L, x + 1, z, 3, 0.0, 0.4), LD.dir_yaw(3))
 	L.add_deco({"k": "fridge", "p": _wall(L, x + 3, z, 3, 0.0, 0.4), "r": LD.dir_yaw(3)})
 	var m := _mid(L, x, z, w, h)
-	_model(L, "WoodenTable_01", m + Vector3(0, 0, 0.8), 0.0)
-	_model(L, "vintage_microwave", m + Vector3(-0.2, 0.76, 0.8), 0.4, 1.0, false)
-	_model(L, "russian_food_cans_01", m + Vector3(0.4, 0.76, 0.9), 0.0, 1.0, false)
+	var ts := Vector3(1.0, 1.35, 1.1)
+	_model(L, "WoodenTable_01", m + Vector3(0, 0, 0.8), 0.0, ts)
+	_model(L, "vintage_microwave", m + Vector3(-0.35, 0, 0.78), 0.25, 0.5, false, 0.0, {"on": ["WoodenTable_01", ts.y]})
+	_model(L, "russian_food_cans_01", m + Vector3(0.45, 0, 0.92), 0.4, 1.0, false, 0.0, {"on": ["WoodenTable_01", ts.y]})
+	_model(L, "can_rusted", m + Vector3(0.62, 0, 0.7), 1.3, 1.0, false, 0.0, {"on": ["WoodenTable_01", ts.y]})
 	for k in 3:
 		_model(L, "can_rusted", m + Vector3(L.rng.randf_range(-1.5, 1.5), 0, L.rng.randf_range(-1.0, 2.0)), L.rng.randf() * TAU, 1.0, false)
 	_model(L, "metal_trash_can", _wall(L, x + w - 1, z + h - 1, 0, 0.0, 0.35), 0.0)
@@ -1255,8 +1312,9 @@ static func bedroom(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 	L.light[LD.idx(cc.x, cc.y)] = LD.L_BULB
 	_model(L, "old_bed_frame", m, L.rng.randf_range(-0.3, 0.3))
 	_model(L, "ClassicNightstand_01", m + Vector3(1.2, 0, -0.6), 0.0)
-	_model(L, "alarm_clock_01", m + Vector3(1.2, 0.62, -0.6), 0.3, 1.0, false)
-	_model(L, "pull_chain_light_socket", Vector3(m.x, L.floor_y + 2.9, m.z), 0.0, 1.0, false)
+	_model(L, "alarm_clock_01", m + Vector3(1.2, 0, -0.62), 0.3, 1.0, false, 0.0, {"on": ["ClassicNightstand_01", 1.0]})
+	# лампочка на шнуре — над той клеткой, где источник L_BULB
+	L.add_deco({"k": "bulb", "p": _c(L, cc.x, cc.y), "r": 0.0})
 	L.add_deco({"k": "sound", "p": m + Vector3(1.2, 0.7, -0.6), "snd": "clock_tick", "every": 0.0, "vol": -12.0, "max_dist": 9.0})
 
 
@@ -1443,6 +1501,9 @@ static func hotel(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 		L.light[ci] = LD.L_BULB if k % 2 == 0 else LD.L_NONE
 		if k % 7 == 4:
 			L.light[ci] = LD.L_FLICK
+		if L.light[ci] == LD.L_BULB:
+			# плафон молочного стекла вместо плоского пятна на потолке
+			L.add_deco({"k": "dome", "p": _c(L, c.x, c.y), "r": 0.0})
 		if k % 2 == 1 and k < n - 1:
 			for sd in sides:
 				var s2: int = sd
@@ -1452,7 +1513,8 @@ static func hotel(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 				num += 1
 	if L.rng.randf() < 0.5:
 		var mid := _ccell(x, z, along_z, n / 2)
-		L.add_deco({"k": "obj", "what": "cart", "p": _c(L, mid.x, mid.y), "r": 0.3, "wrong": "none"})
+		# под потолком 2,7 м в коридоре шириной в клетку зонт сложен
+		L.add_deco({"k": "obj", "what": "cart", "p": _c(L, mid.x, mid.y), "r": 0.12 + (PI * 0.5 if along_z else 0.0), "wrong": "none", "parasol": "closed"})
 
 
 ## Спуск: длинный коридор уходит пандусами и лестницей на 9 м вниз; внизу высокая тёмная щель
@@ -1667,10 +1729,42 @@ static func ceiling_doors(L: LayerData, x: int, z: int, w: int, h: int) -> void:
 	_ceil_all(L, x, z, w, h, 27)
 	_open(L, x, z, w, h, 2, LD.E_ARCH)
 	_lights(L, x, z, w, h, LD.L_ON)
+	# дверь лежит в своей клетке (по центру, светильника там нет); занятая или соседняя с занятой клетка —
+	# ищется ближайшая свободная (без новых обращений к L.rng: те же четыре числа на дверь, что и раньше)
+	var taken := {}
 	for k in 5:
 		var i := L.rng.randi_range(0, w - 1)
 		var j := L.rng.randi_range(0, h - 1)
-		L.add_deco({"k": "door", "kind": "ceiling", "p": _c(L, x + i, z + j) + Vector3(L.rng.randf_range(-0.3, 0.3), 0, 0), "r": L.rng.randi_range(0, 3) * PI * 0.5})
+		var jit := L.rng.randf_range(-0.3, 0.3)
+		var rot := L.rng.randi_range(0, 3) * PI * 0.5
+		var cell := _free_cell(Vector2i(i, j), w, h, taken)
+		if cell.x < 0:
+			continue
+		taken[cell] = true
+		_late_light(L, x + cell.x, z + cell.y, LD.L_NONE)
+		L.add_deco({"k": "door", "kind": "ceiling", "p": _c(L, x + cell.x, z + cell.y) + Vector3(jit * 0.15, 0, 0), "r": rot})
+
+
+## Ближайшая к want клетка комнаты w×h, не занятая и без занятых соседей по стороне (иначе — просто не занятая);
+## (−1, −1) — свободных нет
+static func _free_cell(want: Vector2i, w: int, h: int, taken: Dictionary) -> Vector2i:
+	for strict in [true, false]:
+		for r in maxi(w, h):
+			for dj in range(-r, r + 1):
+				for di in range(-r, r + 1):
+					if maxi(absi(di), absi(dj)) != r:
+						continue
+					var c := want + Vector2i(di, dj)
+					if c.x < 0 or c.y < 0 or c.x >= w or c.y >= h or taken.has(c):
+						continue
+					var ok := true
+					if strict:
+						for o: Vector2i in LD.DIRS:
+							if taken.has(c + o):
+								ok = false
+					if ok:
+						return c
+	return Vector2i(-1, -1)
 
 
 ## Разноуровневый офис: островки пола выше на 0,6–1,2 м, к каждому — ступеньки; на островках столы

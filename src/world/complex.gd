@@ -47,6 +47,13 @@ var _wet := 0.15
 var _room_target := 0.5
 var _wet_target := 0.15
 var _amb_t := 30.0              # до следующего далёкого звука
+var grid: LightGrid = null      # текстуры сетки текущего слоя для попиксельного света
+var grids := {}                 # слой -> LightGrid (собираются один раз)
+
+## Свет и «плёнка» Комплекса: отражённый свет, блики, экспозиция
+const BOUNCE_K := 0.32
+const SPEC_K := 1.0
+const EXPOSURE := 1.6
 
 
 func _ready() -> void:
@@ -54,22 +61,28 @@ func _ready() -> void:
 	var e := Environment.new()
 	e.background_mode = Environment.BG_COLOR
 	e.background_color = Color(0, 0, 0)
-	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	e.tonemap_exposure = 1.0
-	e.tonemap_white = 3.0
+	# AgX: светильники мягко уходят в белое, стены у ламп «пересвечены», как у бытовой камеры под лампами дневного света
+	e.tonemap_mode = Environment.TONE_MAPPER_AGX
+	e.tonemap_exposure = EXPOSURE
+	e.tonemap_white = 6.0
+	# ореол вокруг светильников: широкий, тёплый, только от по-настоящему ярких мест
 	e.glow_enabled = true
-	e.glow_intensity = 0.55
+	# ближний ореол — здесь (по HDR), широкая дымка вокруг ламп — в камере (Glow3/Glow4 в main.gd), без двойного ореола
+	e.glow_intensity = 0.35
 	e.glow_strength = 1.0
-	e.glow_bloom = 0.04
-	e.glow_hdr_threshold = 1.05
-	e.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
+	e.glow_bloom = 0.0
+	e.glow_hdr_threshold = 1.25
+	e.glow_hdr_scale = 1.6
+	e.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
 	e.set_glow_level(0, 0.0)
-	e.set_glow_level(1, 1.0)
-	e.set_glow_level(2, 0.6)
-	e.set_glow_level(3, 0.4)
+	e.set_glow_level(1, 0.55)
+	e.set_glow_level(2, 0.8)
+	e.set_glow_level(3, 0.45)
+	e.set_glow_level(4, 0.0)
+	e.set_glow_level(5, 0.0)
 	e.adjustment_enabled = true
-	e.adjustment_saturation = 1.12
-	e.adjustment_contrast = 1.04
+	e.adjustment_saturation = 1.06
+	e.adjustment_contrast = 1.05
 	env.environment = e
 	add_child(env)
 	for i in 8:
@@ -103,7 +116,18 @@ func setup(layer_list: Array, start_layer: int, start_pos: Vector3, start_yaw: f
 		player.noise_fn = make_noise
 		player.landed.connect(_on_landed)
 		_no_fall_t = 4.0
+	_bind_grid()
 	_sync_load(_focus_pos())
+
+
+## Текстуры сетки текущего слоя в шейдеры (собираются один раз на слой)
+func _bind_grid() -> void:
+	if not grids.has(cur):
+		var g := LightGrid.new()
+		g.setup(layers[cur])
+		grids[cur] = g
+	grid = grids[cur]
+	grid.bind(BOUNCE_K, SPEC_K)
 
 
 func _focus_pos() -> Vector3:
@@ -229,6 +253,8 @@ func _make_chunk(key: Vector3i, res: Dictionary) -> void:
 		PhysicsServer3D.body_add_shape(body, sh, Transform3D(bas, bb[0]))
 		shapes.append(sh)
 	chunks[key] = {"node": n, "body": body, "shapes": shapes, "cell_light": res.cell_light}
+	if grids.has(key.z):
+		(grids[key.z] as LightGrid).put_chunk(key.x, key.y, res.cell_light)
 	Props.spawn_all(self, n, res.deco, key.z)
 
 
@@ -242,6 +268,8 @@ func _free_chunk(key: Vector3i) -> void:
 
 
 func _exit_tree() -> void:
+	LightGrid.unbind()
+	RenderingServer.global_shader_parameter_set("g_ldim", Vector4(0, -1000, 0, 0))
 	for key in pending.keys():
 		WorkerThreadPool.wait_for_task_completion(pending[key])
 	pending.clear()
@@ -263,6 +291,7 @@ func change_layer(new_layer: int, keep_pos: Vector3) -> void:
 	results.clear()
 	_mutex.unlock()
 	cur = new_layer
+	_bind_grid()
 	_sync_load(keep_pos, 1)
 	for e in entities:
 		if is_instance_valid(e) and e.has_method("on_layer_changed"):
@@ -417,11 +446,17 @@ func _process(dt: float) -> void:
 		demo_cam.rotation.z = sin(t * 0.09) * 0.012
 	var fp := _focus_pos()
 	_stream(fp)
+	if grid != null:
+		grid.flush()
+	if Cfg.has_arg("gpu_prof"):
+		_gpu_prof(dt)
 	_update_flicker(dt)
 	RenderingServer.global_shader_parameter_set("g_time", t)
 	RenderingServer.global_shader_parameter_set("g_flick_a", Vector4(flick[0], flick[1], flick[2], flick[3]))
 	RenderingServer.global_shader_parameter_set("g_flick_b", Vector4(flick[4], flick[5], flick[6], flick[7]))
 	RenderingServer.global_shader_parameter_set("g_dim", dim)
+	RenderingServer.global_shader_parameter_set("g_ldim", dim)
+	RenderingServer.global_shader_parameter_set("g_ltime", t)
 	RenderingServer.global_shader_parameter_set("g_cam_light", cam_light)
 	# ближайшая нулевая зона
 	near_null = 99.0
@@ -451,8 +486,9 @@ func _process(dt: float) -> void:
 	var target_gain := clampf(0.45 / maxf(b, 0.12), 1.0, 2.3)
 	gain = lerpf(gain, target_gain, dt * 0.8)
 	var lit := clampf(b, 0.0, 1.2)
-	var fogc := Color(0.16, 0.145, 0.085).lerp(Color(0.012, 0.011, 0.01), clampf(1.0 - lit, 0.0, 1.0))
-	RenderingServer.global_shader_parameter_set("g_fog", Vector4(fogc.r, fogc.g, fogc.b, lerpf(0.045, 0.03, clampf(lit, 0.0, 1.0))))
+	# дымка: тёплая и редкая там, где светло; в темноте — почти чёрная (даль тонет во тьме, а не в молоке)
+	var fogc := Color(0.115, 0.1, 0.06).lerp(Color(0.006, 0.0055, 0.005), clampf(1.0 - lit, 0.0, 1.0))
+	RenderingServer.global_shader_parameter_set("g_fog", Vector4(fogc.r, fogc.g, fogc.b, lerpf(0.04, 0.022, clampf(lit, 0.0, 1.0))))
 	RenderingServer.global_shader_parameter_set("g_ambient", 0.012 + (1.0 - power) * 0.01)
 	interference = maxf(clampf((8.0 - near_null) / 8.0, 0.0, 1.0) * 0.8, 0.0)
 	if Game.main != null and not ended:
@@ -463,6 +499,23 @@ func _process(dt: float) -> void:
 		Snd.loop("hum", "hum_fluor", clampf(0.25 + b * 0.6, 0.15, 0.85) * power * power, 0.25)
 		Snd.loop("room", "room_tone", 0.7, 1.0)
 		Snd.loop("null", "null_hum", clampf(1.0 - near_null / 16.0, 0.0, 1.0) * 0.9, 0.4, "Amb")
+
+
+var _gp_t := 0.0
+var _gp_on := false
+
+
+## Отладка: --gpu_prof — время кадра на видеокарте для 3D-кадра (мс), раз в 2 с
+func _gpu_prof(dt: float) -> void:
+	var rid := get_viewport().get_viewport_rid()
+	if not _gp_on:
+		RenderingServer.viewport_set_measure_render_time(rid, true)
+		_gp_on = true
+	_gp_t += dt
+	if _gp_t > 2.0:
+		_gp_t = 0.0
+		print("GPU ms=%.2f cpu ms=%.2f fps=%d size=%s" % [RenderingServer.viewport_get_measured_render_time_gpu(rid),
+			RenderingServer.viewport_get_measured_render_time_cpu(rid), Engine.get_frames_per_second(), str(get_viewport().get_visible_rect().size)])
 
 
 func _ent_interference(_p: Vector3) -> float:
@@ -529,7 +582,8 @@ func _update_flicker(dt: float) -> void:
 					s.t = randf_range(3.0, 11.0)
 			_flick_sound(g, false)
 		elif kind == 2:
-			flick[g] = 0.8 + 0.1 * sin(t * 13.0 + g) + randf_range(-0.07, 0.07)
+			# гудит и дрожит: плавная дрожь вместо случайного скачка каждый кадр (иначе «рябит» весь кадр)
+			flick[g] = 0.82 + 0.08 * sin(t * 13.0 + g) + 0.05 * sin(t * 37.3 + g * 2.1) * sin(t * 5.1 + g)
 		else:
 			flick[g] = 1.0
 	# зелёный свет нулевой зоны — неровная пульсация
@@ -811,7 +865,7 @@ func _flick_sound(g: int, start: bool) -> void:
 		for dx in range(-4, 5):
 			var x := pc.x + dx
 			var z := pc.y + dz
-			if L.light[LD.idx(x, z)] != LD.L_FLICK or posmod(x * 7 + z * 13, 7) != g:
+			if L.light[LD.idx(x, z)] != LD.L_FLICK or LD.flick_group(x, z) != g:
 				continue
 			var d := absi(dx) + absi(dz)
 			if d < bd:

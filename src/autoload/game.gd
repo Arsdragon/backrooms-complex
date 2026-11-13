@@ -467,7 +467,14 @@ func die() -> void:
 	print("DIE")
 	Snd.stop_all(0.05)
 	Snd.play("death_hit", 2.0)
-	main.set_fade(Color(0.62, 0.0, 0.0, 1.0))
+	# красный кадр «на плёнке» (как в концовках): поле со следом последнего кадра, плёнка красит, шумит, пульсирует.
+	# Последний кадр — до красного экрана (след в красном держится, когда сцена уже убрана)
+	main.freeze_still()
+	var rs: Node = preload("res://src/scenes/red_screen.gd").new()
+	main.vp.add_child(rs)
+	# затемнение «на плёнке» (переход из полигона, недоигранное проявление) не должно прятать красный кадр
+	main.set_fade(Color(0, 0, 0, 0))
+	main.hurt = 1.0
 	main.subs.clear()
 	main.osd.shown = false
 	await get_tree().create_timer(0.35).timeout
@@ -478,6 +485,8 @@ func die() -> void:
 	Snd.stop_loop("death_drone", 1.0)
 	main.fade_to(Color(0, 0, 0, 1), 1.0)
 	await get_tree().create_timer(1.1).timeout
+	if is_instance_valid(rs):
+		rs.queue_free()
 	go_menu()
 
 
@@ -527,9 +536,11 @@ func show_card(k: String) -> void:
 		await get_tree().create_timer(4.0).timeout
 	else:
 		await c.closed
-	c.queue_free()
+	# карточка записана на плёнку: сначала она уходит в чёрное «на плёнке», потом убирается
+	# (иначе на долю секунды мелькнула бы сцена концовки под ней)
 	main.fade_to(Color(0, 0, 0, 1), 0.6)
 	await get_tree().create_timer(0.7).timeout
+	c.queue_free()
 	go_menu()
 
 

@@ -140,6 +140,7 @@ static func layer0(seed: int) -> LayerData:
 	_prof("_scatter(L, 0)")
 	Rooms.sprinkle(L, 0, Vector2i(0, 0))
 	_prof("Rooms.sprinkle(L, 0, Vector2i(0, 0))")
+	Rooms.finish_lights(L)
 	return L
 
 
@@ -159,12 +160,19 @@ static func _outpost(L: LayerData, x: int, z: int) -> void:
 	for lp in lamps:
 		var v: Vector2i = lp
 		L.light[LD.idx(x + v.x, z + v.y)] = LD.L_ASYNC
+		# прожектор на штативе — ровно в центре клетки: там же свет сетки L_ASYNC (y = 1,9)
 		var c2 := LD.cell_center(x + v.x, z + v.y)
-		L.add_deco({"k": "async", "what": "lamp_stand", "p": Vector3(c2.x + 0.6, 0, c2.y - 0.5), "r": L.rng.randf() * TAU})
-	# Порог — в северной стене
+		L.add_deco({"k": "async", "what": "lamp_stand", "p": Vector3(c2.x, 0, c2.y), "r": L.rng.randf() * TAU})
+	# Порог — проём во всю клетку в северной стене; за ним клетка-пустота (тамбур и пелену строит сам Порог),
+	# её остальные рёбра — стены, чтобы из соседних коридоров не было видно изнанки
 	var tx := x + 4
-	L.wall_e[LD.idx(tx - 1, z)] = LD.E_OPEN
-	L.wall_e[LD.idx(tx, z)] = LD.E_OPEN
+	L.set_edge(tx, z, 3, LD.E_OPEN)
+	var vi := LD.idx(tx, z - 1)
+	L.flo[vi] = LD.F_SOLID
+	L.used[vi] = 2
+	L.light[vi] = LD.L_NONE
+	for dd in [0, 2, 3]:
+		L.set_edge(tx, z - 1, dd, LD.E_WALL)
 	var tp := L.wall_point(tx, z, 3, 0.0)
 	L.add_deco({"k": "threshold", "p": tp, "r": LD.dir_yaw(3)})
 	L.places["outpost"] = tp + Vector3(0, 0, 1.2)
@@ -323,8 +331,9 @@ static func _park_room(L: LayerData, x: int, z: int, w: int, h: int, kind: Strin
 	var rr := L.rng
 	match kind:
 		"benches":
-			L.add_deco({"k": "obj", "what": "bench", "p": L.wall_point(x + 1, z, 3, -0.35), "r": LD.dir_yaw(3), "wrong": "wall"})
-			L.add_deco({"k": "obj", "what": "bench", "p": L.wall_point(x + 3, z, 3, -0.1) + Vector3(0, 1.3, 0), "r": LD.dir_yaw(3), "wrong": "wall"})
+			# скамьи вросли в стену спинкой: сиденье и подлокотники в зале (глубже — торчали одни штрихи подлокотников)
+			L.add_deco({"k": "obj", "what": "bench", "p": L.wall_point(x + 1, z, 3, 0.14), "r": LD.dir_yaw(3), "wrong": "wall"})
+			L.add_deco({"k": "obj", "what": "bench", "p": L.wall_point(x + 3, z, 3, 0.14) + Vector3(0, 1.3, 0), "r": LD.dir_yaw(3), "wrong": "wall"})
 			L.add_deco({"k": "obj", "what": "bench", "p": ctr + Vector3(0, 0, 0.6), "r": PI * 0.5, "wrong": "stretch"})
 			L.add_deco({"k": "copy", "who": "oldman", "wrong": "melt_bench", "p": L.wall_point(x + w - 1, z + h - 1, 1, 0.3), "r": LD.dir_yaw(1), "seed": rr.randi()})
 			L.add_deco({"k": "obj", "what": "bin", "p": ctr + Vector3(-1.6, 0, -0.8), "r": 0.0, "wrong": "stack"})
@@ -360,8 +369,11 @@ static func _park_room(L: LayerData, x: int, z: int, w: int, h: int, kind: Strin
 			L.add_deco({"k": "copy", "who": "kid", "wrong": "back", "p": ctr + Vector3(0.2, 0, 1.4), "r": -2.0, "seed": rr.randi()})
 			L.add_deco({"k": "grass", "p": ctr, "r": 0.0, "s": 4.0})
 		"car":
-			L.add_deco({"k": "obj", "what": "car", "p": L.wall_point(x + 2, z, 3, 1.4), "r": LD.dir_yaw(3) + PI + 0.25, "wrong": "wall"})
-			L.add_deco({"k": "stain", "p": ctr + Vector3(0.6, 0, 0.8), "r": 0.0, "s": 2.0, "tire": true})
+			var cp := L.wall_point(x + 2, z, 3, 1.4)
+			var cr := LD.dir_yaw(3) + PI + 0.25
+			L.add_deco({"k": "obj", "what": "car", "p": cp, "r": cr, "wrong": "wall"})
+			# следы шин: от задних колёс под машиной назад в зал (машина въехала носом в стену)
+			L.add_deco({"k": "stain", "p": cp + Basis(Vector3.UP, cr) * Vector3(0, 0, -3.6), "r": cr, "s": 1.9, "len": 4.6, "tire": true})
 			L.add_deco({"k": "sound", "snd": "engine_tick", "p": L.wall_point(x + 2, z, 3, 1.4) + Vector3(0, 0.6, 0), "every": 0.0})
 		"picnic":
 			L.add_deco({"k": "obj", "what": "blanket", "p": ctr, "r": rr.randf() * TAU, "wrong": "none"})
@@ -370,6 +382,23 @@ static func _park_room(L: LayerData, x: int, z: int, w: int, h: int, kind: Strin
 			L.add_deco({"k": "copy", "who": "mother", "wrong": "stroller_fused", "p": ctr, "r": rr.randf() * TAU, "seed": rr.randi()})
 			L.add_deco({"k": "sound", "snd": "music_box", "p": ctr + Vector3(0, 0.8, 0), "every": 0.0})
 	L.places["park_" + kind] = ctr
+
+
+## Можно ли положить на пол клетки плоское (пятно, бумаги): ровный пол без пандуса, и у каждого открытого
+## края сосед на той же высоте и тоже пол — иначе край наклейки повиснет над уступом или ямой
+static func _decal_ok(L: LayerData, x: int, z: int) -> bool:
+	var i := LD.idx(x, z)
+	if L.ramp[i] != 0 or L.water[i] != 0:
+		return false
+	for d in 4:
+		var e := L.edge(x, z, d)
+		if e == LD.E_WALL or e == LD.E_WINDOW:
+			continue
+		var o: Vector2i = LD.DIRS[d]
+		var j := LD.idx(x + o.x, z + o.y)
+		if L.flo[j] != LD.F_FLOOR or L.ramp[j] != 0 or L.fh[j] != L.fh[i]:
+			return false
+	return true
 
 
 static func _cable_tags(L: LayerData) -> void:
@@ -492,14 +521,23 @@ static func _scatter(L: LayerData, lay: int) -> void:
 						var s4: int = sides4[0]
 						p2 = L.wall_point(cx, cz, s4, -0.3)
 						rot2 = LD.dir_yaw(s4) + PI + rr.randf_range(-0.3, 0.3)
+				if what == "balloon":
+					# гелиевый шарик всплыл под потолок (узел шарика — на потолке, ленточка висит)
+					p2.y += L.height_m(cx, cz) - 0.01
 				L.add_deco({"k": "obj", "what": what, "p": p2, "r": rot2, "wrong": ow})
 				continue
 			r -= 1.0 / 520.0
+			# пол клетки (терраса, котлован — свой уровень); на пандусах, лестницах и у обрывов пятна и бумаги не кладём.
+			# Случайные числа тянем всегда в том же порядке — раскладка мира по сиду не меняется
+			var gy := L.floor_y + L.fh[i] * 0.1
+			var flat := _decal_ok(L, cx, cz)
 			# лужи и пятна
 			var pud := 1.0 / 22.0 if zn == LD.Z_DARK else 1.0 / 110.0
 			if r < pud:
-				L.add_deco({"k": "stain", "p": Vector3(c.x + rr.randf_range(-0.8, 0.8), L.floor_y, c.y + rr.randf_range(-0.8, 0.8)), "r": rr.randf() * TAU,
-					"s": rr.randf_range(0.8, 2.2), "wet": zn == LD.Z_DARK or rr.randf() < 0.4})
+				var sd := {"k": "stain", "p": Vector3(c.x + rr.randf_range(-0.8, 0.8), gy, c.y + rr.randf_range(-0.8, 0.8)), "r": rr.randf() * TAU,
+					"s": rr.randf_range(0.8, 2.2), "wet": zn == LD.Z_DARK or rr.randf() < 0.4}
+				if flat:
+					L.add_deco(sd)
 				continue
 			r -= pud
 			# плесень на стенах
@@ -508,19 +546,23 @@ static func _scatter(L: LayerData, lay: int) -> void:
 				var sides5 := L.wall_sides(cx, cz)
 				if not sides5.is_empty():
 					var s5: int = sides5[rr.randi_range(0, sides5.size() - 1)]
-					L.add_deco({"k": "mold", "p": L.wall_point(cx, cz, s5, 0.0) + Vector3(0, rr.randf_range(0.2, 1.6), 0), "r": LD.dir_yaw(s5),
+					L.add_deco({"k": "mold", "p": L.wall_point(cx, cz, s5, 0.0) + Vector3(0, gy - L.floor_y + rr.randf_range(0.2, 1.6), 0), "r": LD.dir_yaw(s5),
 						"along": rr.randf_range(-0.7, 0.7), "s": rr.randf_range(0.6, 1.8)})
 				continue
 			r -= mp
 			# бумаги, мусор, офисная мебель
 			if r < 1.0 / 160.0:
-				L.add_deco({"k": "papers", "p": Vector3(c.x + rr.randf_range(-0.8, 0.8), L.floor_y, c.y + rr.randf_range(-0.8, 0.8)), "r": rr.randf() * TAU})
+				var pd := {"k": "papers", "p": Vector3(c.x + rr.randf_range(-0.8, 0.8), gy, c.y + rr.randf_range(-0.8, 0.8)), "r": rr.randf() * TAU}
+				if flat:
+					L.add_deco(pd)
 				continue
 			r -= 1.0 / 160.0
 			if zn == LD.Z_OLD and r < 1.0 / 30.0:
 				var oo: String = ["chair", "desk", "cabinet", "ochair", "boxes", "shelf", "wetsign", "crate"][rr.randi_range(0, 7)]
-				L.add_deco({"k": "obj", "what": oo, "p": Vector3(c.x + rr.randf_range(-0.5, 0.5), L.floor_y, c.y + rr.randf_range(-0.5, 0.5)),
-					"r": rr.randf() * TAU, "wrong": "none" if rr.randf() < 0.7 else "tilt"})
+				var od := {"k": "obj", "what": oo, "p": Vector3(c.x + rr.randf_range(-0.5, 0.5), gy, c.y + rr.randf_range(-0.5, 0.5)),
+					"r": rr.randf() * TAU, "wrong": "none" if rr.randf() < 0.7 else "tilt"}
+				if flat:
+					L.add_deco(od)
 
 
 # ======================================================================= слой 1
@@ -640,6 +682,7 @@ static func layer1(seed: int, l0: LayerData) -> LayerData:
 	_prof("_scatter(L, 1)")
 	Rooms.sprinkle(L, 1, first)
 	_prof("Rooms.sprinkle(L, 1, first)")
+	Rooms.finish_lights(L)
 	return L
 
 
@@ -726,15 +769,21 @@ static func _house(L: LayerData, x: int, z: int) -> void:
 	L.add_deco({"k": "house", "what": "rug", "p": Vector3(lv.x, y, lv.y + 0.2), "r": 0.0})
 	L.add_deco({"k": "house", "what": "floorlamp", "p": Vector3(lv.x - 1.7, y, lv.y - 2.2), "r": 0.0})
 	L.add_deco({"k": "house", "what": "frame", "p": L.wall_point(x, z + 1, 2, 0.0) + Vector3(0, 1.55, 0), "r": LD.dir_yaw(2)})
-	L.add_deco({"k": "house", "what": "counter", "p": L.wall_point(x + 4, z, 3, 0.35), "r": LD.dir_yaw(3) + PI})
-	L.add_deco({"k": "house", "what": "fridge", "p": L.wall_point(x + 5, z, 3, 0.4), "r": LD.dir_yaw(3) + PI})
+	# кухня у северной стены: лицевой стороной (+z модели) в комнату, как в room_kitchen
+	L.add_deco({"k": "house", "what": "counter", "p": L.wall_point(x + 4, z, 3, 0.35), "r": LD.dir_yaw(3)})
+	L.add_deco({"k": "house", "what": "fridge", "p": L.wall_point(x + 5, z, 3, 0.4), "r": LD.dir_yaw(3)})
 	L.add_deco({"k": "house", "what": "table", "p": Vector3(kt.x, y, kt.y + 1.4), "r": 0.0})
 	L.add_deco({"k": "house", "what": "stairs", "p": Vector3(hl.x + 1.1, y, hl.y - 0.3), "r": 0.0})
 	L.add_deco({"k": "house", "what": "clock", "p": L.wall_point(x + 1, z + 4, 1, 0.0) + Vector3(0, 1.9, 0), "r": LD.dir_yaw(1)})
-	L.add_deco({"k": "house", "what": "stove", "p": L.wall_point(x + 3, z, 3, 0.35), "r": LD.dir_yaw(3) + PI})
-	L.add_deco({"k": "house", "what": "microwave", "p": L.wall_point(x + 4, z, 3, 0.3) + Vector3(0.4, 0.94, 0), "r": LD.dir_yaw(3) + PI})
+	L.add_deco({"k": "house", "what": "stove", "p": L.wall_point(x + 3, z, 3, 0.35), "r": LD.dir_yaw(3)})
+	L.add_deco({"k": "house", "what": "microwave", "p": L.wall_point(x + 4, z, 3, 0.3) + Vector3(0.4, 0.94, 0), "r": LD.dir_yaw(3)})
 	L.add_deco({"k": "house", "what": "phone", "p": L.wall_point(x + 3, z + 4, 1, 0.1) + Vector3(0, 1.2, 0), "r": LD.dir_yaw(1)})
 	L.add_deco({"k": "voice_wall", "p": L.wall_point(x + 5, z + 1, 0, 0.0) + Vector3(0, 1.3, 0), "r": LD.dir_yaw(0)})
+	# лампочки (L_BULB и мигающая L_FLICK гостиной): на шнуре под тканевым абажуром, у потолка — лепная
+	# розетка (закрывает плоское пятно светильника на потолке)
+	for bc in [Vector2i(x + 1, z + 1), Vector2i(x + 4, z + 1), Vector2i(x + 1, z + 3)]:
+		var bcc := LD.cell_center(bc.x, bc.y)
+		L.add_deco({"k": "bulb", "p": Vector3(bcc.x, y, bcc.y), "r": 0.0, "rose": true, "shade": true})
 	L.places["house"] = Vector3(lv.x, y, lv.y)
 
 

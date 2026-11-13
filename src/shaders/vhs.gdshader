@@ -1,31 +1,77 @@
 shader_type canvas_item;
-// Плёнка VHS / бытовая видеокамера начала 90-х.
-// TEXTURE — кадр из 3D-вьюпорта (480 строк). Всё считается в «строках» исходного кадра.
+render_mode blend_disabled, unshaded;
+// Плёнка VHS: запись бытовой камерой и воспроизведение на видеомагнитофоне. Считается в строках кадра
+// (480/600/720), потом кадр масштабируется на экран (vhs_out.gdshader) — шум и мягкость «родные» для кассеты.
+// Источник cam_tex — картинка камеры уже с объективом, матрицей, ранением и OSD (camera.gdshader).
+// Полоса кассеты одна и та же в долях кадра, поэтому мягкость и зерно считаются в «строках кассеты» (480):
+// при 600/720 строках картинка так же мягкая, а зерно того же размера.
+//
+//   1. ГЕОМЕТРИЯ: ошибка развёртки (строки чуть гуляют), шум переключения головок внизу кадра.
+//      Полоса трекинга, рваные строки и рывки — ТОЛЬКО при событиях (tracking, interference) и редких сбоях (glitch).
+//   2. СИГНАЛ: яркость Y — полоса ~3 МГц (≈ 250–280 ТВЛ), чуть мягче и по вертикали, «резкость» видеомагнитофона
+//      с тёмной каймой без светлых ореолов; цвет IQ — полоса ~0.5 МГц (≈ 40 ТВЛ): мягкое пятно ~12 пикс кассеты,
+//      запаздывает вправо и тянет хвост (насыщенное красное и жёлтое растекается за край предмета), усреднён
+//      по паре строк, фаза чуть дрожит. Приподнятый шумный чёрный. Обесцвечивание ~10 %.
+//   3. ЗАТЕМНЕНИЕ fade_col (переходы и смерть «записаны на плёнку»); ранение здесь — только «болезнь» ленты
+//      (дрожь строк, больше шума), сам красный — в камере (camera.gdshader), чтобы не красить надписи OSD.
+//   4. ШУМЫ ПЛЁНКИ поверх записанного: полосчатый шум яркости (сильнее в тенях и с автоусилением gain),
+//      бледные крупные цветные пятна (не «конфетти»), шум головок, редкие выпадения, снег полосы трекинга.
+//      Кадр смерти (hurt = 1) — тоже запись: катящаяся полоса фона, гуще шум и пятна, чаще выпадения.
+//   5. «СТОП» (синий экран) и «снег» при максимальных помехах.
+// intensity (настройка 0..1.5) масштабирует всё плёночное; при 0 — чистая картинка камеры.
 
-uniform float intensity = 1.0;      // общая сила эффекта (настройка)
-uniform float gain = 1.0;           // автоусиление камеры в темноте (шум растёт)
+uniform sampler2D cam_tex : filter_linear, repeat_disable;
+uniform float intensity = 1.0;      // общая сила плёнки (настройка)
+uniform float gain = 1.0;           // автоусиление камеры в темноте: шум растёт
 uniform float interference = 0.0;   // помехи: нулевая зона, Сущность рядом (0..1)
 uniform float tracking = 0.0;       // срыв трекинга (вспышка 0..1)
+uniform float glitch = 0.0;         // редкий случайный сбой ленты (0..1), задаёт main.gd
 uniform float stopfx = 0.0;         // «стоп/перемотка»: 0..1
 uniform float desat = 0.0;          // доп. обесцвечивание
 uniform float bw = 0.0;             // 1 — чёрно-белая камера наблюдения
-uniform float hurt = 0.0;           // ранение 0..1: кадр краснеет от краёв к центру (полоски здоровья нет)
+uniform float hurt = 0.0;           // ранение 0..1: лента «болеет» (красный — в camera.gdshader)
 uniform float hurt_flash = 0.0;     // вспышка в момент удара
+uniform vec4 fade_col = vec4(0.0);  // затемнение кадра (цвет и сила)
 uniform vec2 src_size = vec2(640.0, 480.0);
 uniform float time_offset = 0.0;
 
-float hash(vec2 p) {
-	p = fract(p * vec2(123.34, 456.21));
-	p += dot(p, p + 45.32);
-	return fract(p.x * p.y);
+const vec3 LUMA = vec3(0.299, 0.587, 0.114);
+
+// целочисленный хеш (PCG): не «плывёт» на больших номерах строк и полей
+uint pcg(uint v) {
+	uint s = v * 747796405u + 2891336453u;
+	uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+	return (w >> 22u) ^ w;
 }
 
-float noise1(float x) {
+float h3(vec3 p) {
+	uvec3 q = uvec3(ivec3(floor(p)) + ivec3(65536));
+	return float(pcg(q.x + pcg(q.y + pcg(q.z)))) * (1.0 / 4294967295.0);
+}
+
+float noise1(float x, float seed) {
 	float i = floor(x);
 	float f = fract(x);
-	float a = hash(vec2(i, 1.7));
-	float b = hash(vec2(i + 1.0, 1.7));
-	return mix(a, b, f * f * (3.0 - 2.0 * f));
+	return mix(h3(vec3(i, seed, 0.0)), h3(vec3(i + 1.0, seed, 0.0)), f * f * (3.0 - 2.0 * f));
+}
+
+// шум вдоль строки: случайные значения в узлах через cell пикселей, плавно между ними
+float vnoise_x(float x, float row, float seed) {
+	float i = floor(x);
+	float f = fract(x);
+	return mix(h3(vec3(i, row, seed)), h3(vec3(i + 1.0, row, seed)), f * f * (3.0 - 2.0 * f));
+}
+
+// плавный шум по строке и по вертикали — цветные «облака» на несколько строк
+float vnoise_2(vec2 p, float seed) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	float a = h3(vec3(i.x, i.y, seed));
+	float b = h3(vec3(i.x + 1.0, i.y, seed));
+	float c = h3(vec3(i.x, i.y + 1.0, seed));
+	float d = h3(vec3(i.x + 1.0, i.y + 1.0, seed));
+	return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
 vec3 rgb2yiq(vec3 c) {
@@ -40,106 +86,182 @@ vec3 yiq2rgb(vec3 c) {
 				c.x - 1.106 * c.y + 1.703 * c.z);
 }
 
+float luma_at(vec2 p) {
+	return dot(texture(cam_tex, p).rgb, LUMA);
+}
+
 void fragment() {
 	float t = TIME + time_offset;
-	vec2 uv = UV;
 	float k = intensity;
-	float line = floor(uv.y * src_size.y);
+	float kb = min(k, 1.25);                         // мягкость дальше «тяжёлой» не растёт
+	float H = src_size.y;
 	float px = 1.0 / src_size.x;
+	float rk = H / 480.0;                            // пикселей кадра на «строку кассеты»
+	float res_k = mix(1.0, rk, 0.5);                 // дрожь строк: при 600/720 строках чуть шире в пикселях
+	float fr = mod(floor(t * 59.94), 7200.0);        // номер поля
+	float line = floor(UV.y * H);
+	float xs = floor(UV.x * src_size.x);
+	float tl = floor(UV.y * 480.0);                  // строка кассеты (зерно одного размера при любом разрешении)
+	float tx = floor(UV.x * src_size.x / rk);        // пиксель кассеты по строке
+	float kev = max(k, 0.35);                        // события (помехи, срыв) видны и при слабом эффекте
+	float trk = clamp(max(tracking, glitch * k), 0.0, 1.0);
+	float ev = clamp(trk + interference * 0.8, 0.0, 1.0);
+	// «болезнь» ленты от ранения: растёт с ранением, а в смерти (hurt = 1) отпускает — красный кадр ровный
+	float hr = clamp(hurt, 0.0, 1.0) * (1.0 - smoothstep(0.9, 1.0, hurt));
+	// смерть (hurt = 1): красный кадр — это запись: по нему катится полоса фона, гуще шум и пятна цвета
+	float dead = smoothstep(0.97, 1.0, hurt);
+	vec2 uv = UV;
 
-	// --- геометрические искажения строк ---
-	float wob = (noise1(line * 0.11 + t * 9.0) - 0.5) * 0.9 * px * k;
-	// медленное «плавание» кадра
-	wob += (noise1(t * 0.7) - 0.5) * 0.6 * px * k;
-	// полоса срыва трекинга, ползущая по кадру
-	float band_pos = fract(t * 0.045);
-	float band = smoothstep(0.035, 0.0, abs(uv.y - band_pos)) * (0.15 + tracking * 1.5 + interference * 0.8) * k;
-	wob += band * (hash(vec2(line, floor(t * 30.0))) - 0.5) * 18.0 * px;
-	// помехи: рваные строки
-	float tear = step(1.0 - interference * 0.25 - tracking * 0.4, hash(vec2(floor(line / 3.0), floor(t * 24.0))));
-	wob += tear * (hash(vec2(line, t)) - 0.5) * 40.0 * px * (interference + tracking);
-	// шум переключения головок внизу кадра
-	float head = smoothstep(src_size.y - 7.0, src_size.y - 1.0, line);
-	wob += head * (hash(vec2(line, floor(t * 60.0))) * 14.0 + 5.0) * px * k;
-	// вертикальный рывок при сильных помехах
-	float vjump = step(0.985 - interference * 0.06, hash(vec2(floor(t * 8.0), 3.1))) * (interference + tracking) * 0.04;
-	uv.y = fract(uv.y + vjump);
-	uv.x += wob;
+	// ================= 1. ГЕОМЕТРИЯ =================
+	// ошибка развёртки: плавная волна по кадру и мелкая дрожь строк (в пикселях)
+	float x_off = (noise1(line * 0.045 + t * 3.1, 1.0) - 0.5) * 0.6 + (h3(vec3(line, fr, 2.0)) - 0.5) * 0.3;
+	x_off += (noise1(t * 0.6, 3.0) - 0.5) * 0.5;     // медленное «плавание» всего кадра
+	// раненая камера/лента: строки дрожат сильнее, кадр «плавает»
+	x_off += ((h3(vec3(floor(line * 0.5), fr, 3.0)) - 0.5) * 1.4 + (noise1(line * 0.02 - t * 1.7, 7.0) - 0.5) * 2.0) * hr * hr;
+	x_off *= k * res_k;
+	// переключение головок: нижние ~1.3% строк сдвинуты вправо и рваные
+	float hs_n = max(4.0, H * 0.0135);
+	float hs = smoothstep(H - hs_n - 2.0, H - hs_n * 0.6, line);
+	x_off += hs * (5.0 + 8.0 * h3(vec3(floor(line * 0.5), fr, 4.0)) + 6.0 * noise1(t * 2.0, 5.0)) * k * res_k;
+	// полоса трекинга, рваные строки, вертикальный рывок — только при событиях
+	float band = 0.0;
+	if (ev > 0.002) {
+		float by = fract(0.7 - t * 0.085 + 0.25 * noise1(t * 0.4, 6.0));
+		float d = abs(UV.y - by);
+		d = min(d, 1.0 - d);
+		band = smoothstep(0.05 + 0.05 * ev, 0.0, d) * ev * kev;
+		x_off += band * (h3(vec3(line, fr, 8.0)) - 0.5) * 24.0;
+		float tear = step(1.0 - interference * 0.25 - trk * 0.3, h3(vec3(floor(line / 3.0), floor(t * 24.0), 9.0)));
+		x_off += tear * (h3(vec3(line, floor(t * 60.0), 10.0)) - 0.5) * 40.0 * clamp(interference + trk, 0.0, 1.0);
+		float vjump = step(0.985 - interference * 0.06, h3(vec3(floor(t * 8.0), 11.0, 0.0))) * (interference + trk) * 0.04;
+		uv.y = fract(uv.y + vjump);
+	}
+	uv.x += x_off * px;
+	float line2 = floor(uv.y * H);
 
-	// --- яркость (Y) резче, цвет (IQ) размыт и сдвинут ---
-	vec3 c0 = texture(TEXTURE, uv).rgb;
-	vec3 cl = texture(TEXTURE, uv - vec2(px * 1.2, 0.0)).rgb;
-	vec3 cr = texture(TEXTURE, uv + vec2(px * 1.2, 0.0)).rgb;
-	float Y = rgb2yiq(c0).x * 0.5 + rgb2yiq(cl).x * 0.25 + rgb2yiq(cr).x * 0.25;
-	float Yblur = 0.0;
+	// ================= 2. СИГНАЛ =================
+	// яркость: 9 отводов по строке в двух полустроках (чуть мягче и по вертикали — кадр из двух полей).
+	// Узкая полоса (Y, σ ≈ 1.15 пикс кассеты ≈ 280 ТВЛ) и широкая (Yw) — для «резкости» видеомагнитофона.
+	float lw = 1.45 * kb * rk * px;
+	float vy = 0.42 * kb * rk / H;
+	float Y = 0.0;
+	float Yw = 0.0;
+	float wy = 0.0;
+	float wyw = 0.0;
+	for (int i = -4; i <= 4; i++) {
+		float fi = float(i);
+		float xx = uv.x + fi * lw;
+		float y = (luma_at(vec2(xx, uv.y - vy)) + luma_at(vec2(xx, uv.y + vy))) * 0.5;
+		float a = exp(-fi * fi * 0.69);   // σ ≈ 0.85 отвода
+		float b = exp(-fi * fi * 0.09);   // σ ≈ 2.4 отвода
+		Y += y * a;
+		wy += a;
+		Yw += y * b;
+		wyw += b;
+	}
+	Y /= wy;
+	Yw /= wyw;
+	// подчёркивание контуров: тёмная кайма допускается, светлый ореол — едва заметный (без белых обводов)
+	Y += clamp((Y - Yw) * 0.9 * k, -0.065 * k, 0.016 * k);
+	// смерть: медленно катящаяся вниз широкая полоса фона (наводка 60 Гц) и неровная яркость по строкам
+	if (dead > 0.001) {
+		float hum = 0.5 + 0.5 * sin((UV.y - t * 0.13) * 6.2832);
+		Y *= 1.0 + dead * kev * ((hum * hum - 0.4) * 0.24 + (noise1(line2 * 0.11 + t * 2.0, 44.0) - 0.5) * 0.06);
+	}
+	// цвет: полоса VHS ~0.5 МГц (≈ 40 ТВЛ — в 7 раз уже яркости). Цвет — мягкое пятно шириной ~12 пикс
+	// кассеты (σ ≈ 5), запаздывает вправо на ~3 пикс и тянет хвост вправо ещё на ~10 пикс: насыщенные
+	// красные и жёлтые расплываются за край предмета, мелкие цветные детали сливаются в пятна.
+	// Усреднён по паре строк (гребенчатый фильтр). 18 отводов через 2 пикс кассеты: −8…+26 пикс.
+	float cs = 2.0 * kb * rk * px;
+	float cy = mix(uv.y, (floor(line2 * 0.5) * 2.0 + 1.0) / H, step(0.001, k));
 	vec2 IQ = vec2(0.0);
-	float cs = 2.0 + 1.5 * k;
-	for (int i = -3; i <= 3; i++) {
-		vec2 o = vec2(float(i) * px * cs, 0.0);
-		vec3 s = rgb2yiq(texture(TEXTURE, uv + o + vec2(px * 2.5 * k, 0.0)).rgb);
-		IQ += s.yz;
-		Yblur += rgb2yiq(texture(TEXTURE, uv + o * 0.6).rgb).x;
+	float wc = 0.0;
+	for (int i = -4; i <= 13; i++) {
+		float d = float(i) * 2.0;                     // на сколько пикс кассеты левее берём (цвет приходит справа)
+		float w = exp(-(d - 3.0) * (d - 3.0) / 50.0) + (d > 0.0 ? exp(-d / 10.0) * 0.32 : 0.0);
+		IQ += rgb2yiq(texture(cam_tex, vec2(uv.x - float(i) * cs, cy)).rgb).yz * w;
+		wc += w;
 	}
-	IQ /= 7.0;
-	Yblur /= 7.0;
-	// «окантовка» резкости бытовых камер
-	Y += (Y - Yblur) * 0.55 * k;
-
-	// --- автоусиление и шум ---
-	float g = gain;
-	Y *= g;
-	IQ *= mix(1.0, g, 0.6);
-	float grain = (hash(uv * src_size + vec2(fract(t * 13.0) * 100.0, fract(t * 7.0) * 50.0)) - 0.5);
-	float noise_amt = (0.035 + 0.05 * max(g - 1.0, 0.0) + interference * 0.25) * k;
-	Y += grain * noise_amt;
-	// цветной «снег» пятнами
-	vec2 blot = vec2(hash(floor(uv * src_size / vec2(6.0, 2.0)) + floor(t * 20.0)), hash(floor(uv * src_size / vec2(5.0, 2.0)) + floor(t * 20.0) + 7.0)) - 0.5;
-	IQ += blot * (0.03 + 0.04 * max(g - 1.0, 0.0) + interference * 0.15) * k;
-	// выпадения ленты — белые чёрточки
-	float drop = step(0.9993 - interference * 0.004 - tracking * 0.01, hash(vec2(floor(uv.x * 40.0), line + floor(t * 15.0) * 17.0)));
-	Y += drop * 0.7 * k;
-	// полоса трекинга светлее и шумнее
-	Y += band * 0.35 * (hash(vec2(uv.x * 50.0, line + t)) - 0.3);
-
-	// --- цвет плёнки ---
-	IQ *= (1.0 - desat) * (1.0 - 0.06 * k);
+	IQ /= wc;
+	// фаза поднесущей дрожит по строкам — оттенок чуть гуляет (у раненой камеры — сильнее)
+	float ph = (noise1(line2 * 0.2 + t * 14.0, 12.0) - 0.5) * 0.14 * k * (1.0 + hr * 1.3);
+	IQ = mat2(vec2(cos(ph), sin(ph)), vec2(-sin(ph), cos(ph))) * IQ;
+	// плёнка теряет насыщенность (~10 %); в полосе срыва цвет пропадает
+	IQ *= (1.0 - desat) * (1.0 - 0.1 * min(k, 1.25)) * (1.0 - bw) * (1.0 - min(band * 1.2, 0.9));
+	// приподнятый чёрный: уровень гашения плёнки ~13/255 (с усилением — выше), только в самых тенях —
+	// средние тона не «молочные»
+	float gn = max(gain - 1.0, 0.0);
+	float lift = (0.05 + 0.014 * min(gn, 1.5)) * min(k, 1.2);
+	Y += lift * (1.0 - smoothstep(0.0, 0.26, Y));
 	vec3 col = yiq2rgb(vec3(Y, IQ));
-	// поднятые чёрные, мягкое «выгорание» светов
-	col = max(col, vec3(0.0));
-	col = col / (1.0 + col * 0.12);
-	col = mix(col, vec3(0.035, 0.03, 0.04) + col * 0.95, 0.6 * k);
-	// интерлейс / строки
-	float sl = 0.94 + 0.06 * sin(uv.y * src_size.y * 3.14159);
-	col *= mix(1.0, sl, 0.8 * k);
-	// виньетка объектива
-	vec2 vc = UV - 0.5;
-	float vig = 1.0 - dot(vc, vc) * 0.55 * k;
-	col *= vig;
-	// камера наблюдения
-	float lum = dot(col, vec3(0.299, 0.587, 0.114));
-	col = mix(col, vec3(lum) * vec3(0.92, 1.0, 0.95), bw);
-	// ранение: красное наползает с краёв, сердце стучит, при смерти — весь кадр красный
-	if (hurt > 0.001 || hurt_flash > 0.001) {
-		float hr = clamp(hurt, 0.0, 1.0);
-		float beat = pow(max(sin(TIME * (5.0 + hr * 3.0)), 0.0), 6.0) * hr;
-		float r = length(vc * vec2(1.25, 1.0)) * 1.55;
-		float reach = mix(1.25, 0.05, hr) - beat * 0.12;
-		float edge = smoothstep(reach - 0.35, reach + 0.25, r);
-		float lr = dot(col, vec3(0.299, 0.587, 0.114));
-		vec3 bled = vec3(0.07 + lr * 1.15, lr * 0.10, lr * 0.08);
-		float amt = clamp(edge * (0.55 + 0.45 * hr) + hr * hr * 0.35 + hurt_flash * 0.55, 0.0, 1.0);
-		col = mix(col, bled, amt);
-		col *= 1.0 - edge * 0.35 * hr;
-	}
+	// камера наблюдения (Async): чёрно-белая, чуть зеленоватая
+	col = mix(col, vec3(Y) * vec3(0.92, 1.0, 0.95), bw);
+	// строка, сдвинутая за край (переключение головок, срыв), открывает чёрное гашение, а не размазанный край
+	col *= smoothstep(-px, 0.0, uv.x) * smoothstep(1.0 + px, 1.0, uv.x);
+	col = clamp(col, 0.0, 1.0);
 
-	// --- «стоп»: синий экран и полосы ---
+	// ================= 3. ЗАТЕМНЕНИЕ =================
+	// затемнение (fade_to / set_fade): под шумом плёнки, как настоящая запись (чёрный — уровня гашения)
+	col = mix(col, fade_col.rgb + vec3(lift * dot(vec3(1.0) - fade_col.rgb, vec3(0.333))), fade_col.a);
+
+	// ================= 4. ШУМЫ ПЛЁНКИ =================
+	float nY = 0.0;
+	vec2 nC = vec2(0.0);
+	if (k > 0.001) {
+		float yc = dot(col, LUMA);
+		float dark = 1.0 - smoothstep(0.04, 0.55, yc);
+		// полосчатый шум яркости: в «пикселях кассеты», вытянут по строке; сильнее в тенях и с автоусилением
+		float namp = (0.062 + 0.05 * gn) * k * (0.7 + 0.75 * dark) * (1.0 + hr * 0.6 + dead * 0.7);
+		nY = (vnoise_x(tx / 2.4, tl, fr * 4.0) - 0.5) * 0.8
+			+ (vnoise_x(tx / 7.0, tl, fr * 4.0 + 14.0) - 0.5) * 0.45
+			+ (h3(vec3(tx, tl, fr * 4.0 + 1.0)) - 0.5) * 0.4;
+		nY *= namp;
+		nY *= 1.0 - 0.6 * smoothstep(0.85, 1.0, yc);   // выбитый белый срезан ограничителем
+		// цветные пятна: шум цвета прошёл ту же узкую полосу, что и сам цвет — это не мелкое «конфетти»,
+		// а мягкие вытянутые по строке пятна (~25–60 пикс кассеты) на несколько строк, бледные.
+		// С усилением растёт в основном шум яркости (camera.gdshader и выше), цвет — едва-едва.
+		nC = (vec2(vnoise_2(vec2(tx / 26.0, tl / 2.5), fr * 4.0 + 2.0), vnoise_2(vec2(tx / 31.0, tl / 3.0), fr * 4.0 + 3.0)) - 0.5) * 0.7;
+		nC += (vec2(vnoise_2(vec2(tx / 64.0, tl / 7.0), fr * 4.0 + 15.0), vnoise_2(vec2(tx / 76.0, tl / 8.0), fr * 4.0 + 16.0)) - 0.5) * 0.8;
+		// (насыщенный красный на VHS шумит сильнее всего — у кадра смерти пятна гуще)
+		nC *= (0.04 + 0.008 * min(gn, 1.5)) * k * (0.75 + 0.2 * dark) * (1.0 + hr * 0.5 + dead * 0.9);
+		// в тёмном цвет шумит слабее: у тёмного и сигнала цвета мало, а срезанные снизу каналы (синий)
+		// иначе дают лиловую «кашу»
+		nC *= 0.25 + 0.75 * smoothstep(0.03, 0.3, yc);
+		// шум переключения головок
+		nY += hs * ((h3(vec3(floor(xs / 3.0), line, fr * 4.0 + 5.0)) - 0.5) * 0.22 - 0.04) * k;
+		nC += hs * (vec2(h3(vec3(floor(xs / 7.0), line, fr * 4.0 + 6.0)), h3(vec3(floor(xs / 7.0), line, fr * 4.0 + 7.0))) - 0.5) * 0.08 * k;
+	}
+	// выпадения ленты: редкие короткие белые штрихи (чаще при помехах и у раненой ленты)
+	float drate = 0.000025 * k + interference * 0.002 + trk * 0.003 + (hr * hr * 0.0003 + dead * 0.0005) * k;
+	if (h3(vec3(line, fr, 13.0)) < drate) {
+		float x0 = h3(vec3(line, fr, 14.0));
+		float len = 0.008 + 0.05 * h3(vec3(line, fr, 15.0));
+		float on = smoothstep(x0 - 0.003, x0, UV.x) * (1.0 - smoothstep(x0 + len * 0.6, x0 + len, UV.x));
+		nY += on * (0.5 + 0.3 * h3(vec3(xs, line, fr)));
+	}
+	// помехи: зерно сильнее, цвет «кипит»
+	if (interference > 0.001) {
+		nY += interference * 0.22 * kev * (h3(vec3(xs, line, fr * 4.0 + 8.0)) - 0.5);
+		nC += interference * 0.12 * kev * (vec2(h3(vec3(floor(xs / 4.0), line, fr * 4.0 + 9.0)), h3(vec3(floor(xs / 4.0), line, fr * 4.0 + 10.0))) - 0.5);
+	}
+	// полоса трекинга: по строкам белые (и реже чёрные) штрихи разной длины с мягкими хвостами
+	if (band > 0.001) {
+		float cell = 6.0 + 20.0 * h3(vec3(line, fr, 16.0));
+		float sn = vnoise_x(xs / cell, line, fr * 4.0 + 11.0);
+		float white = smoothstep(0.64, 0.8, sn) * (0.5 + 0.45 * h3(vec3(floor(xs / 3.0), line, fr * 4.0 + 12.0)));
+		float black = smoothstep(0.3, 0.16, sn) * 0.22;
+		nY += band * (white - black + (h3(vec3(xs, line, fr * 4.0 + 13.0)) - 0.5) * 0.1);
+	}
+	nC *= 1.0 - bw;
+	col += yiq2rgb(vec3(nY, nC));
+
+	// ================= 5. «СТОП» И «СНЕГ» =================
 	if (stopfx > 0.0) {
-		float sn = hash(vec2(uv.x * 300.0, line + floor(t * 40.0)));
+		float sn = h3(vec3(floor(xs / 2.0), line, fr * 2.0 + 21.0));
 		vec3 st = mix(vec3(sn * 0.6), vec3(0.05, 0.08, 0.55), smoothstep(0.6, 1.0, stopfx));
 		col = mix(col, st, stopfx);
 	}
-	// жёсткий «снег» при максимальных помехах
 	float snow = smoothstep(0.75, 1.0, interference);
-	col = mix(col, vec3(hash(uv * src_size + t * 60.0)), snow * 0.85);
-	COLOR = vec4(col, 1.0);
+	col = mix(col, vec3(h3(vec3(xs, line, fr * 2.0 + 31.0))), snow * 0.85);
+	COLOR = vec4(clamp(col, 0.0, 1.0), 1.0);
 }

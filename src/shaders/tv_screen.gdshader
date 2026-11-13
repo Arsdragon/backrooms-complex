@@ -1,6 +1,7 @@
 shader_type spatial;
 render_mode unshaded, cull_back;
-// Экран кинескопа: канал из SubViewport, строки, мерцание, «снег» (channel_static = 1)
+// Экран кинескопа: канал из SubViewport, строки, мерцание, «снег» (channel_static = 1).
+// От сети: при отключении питания гаснет (g_power), вдали тонет в тумане.
 
 uniform sampler2D screen : source_color, filter_linear;
 uniform sampler2D noise_tex : filter_linear_mipmap, repeat_enable;
@@ -9,6 +10,7 @@ uniform float bright = 1.6;
 global uniform vec4 g_fog;
 global uniform vec4 g_dim;
 global uniform float g_time;
+global uniform float g_power;
 varying vec3 wpos;
 
 float hash(vec2 p) {
@@ -37,7 +39,7 @@ void fragment() {
 	col *= edge;
 	float dd = distance(wpos, g_dim.xyz);
 	col *= 1.0 - g_dim.w * smoothstep(14.0, 2.0, dd) * 0.8;
-	col *= bright;
+	col *= bright * g_power;
 	float dist = length(VERTEX);
 	float f = 1.0 - exp(-dist * g_fog.a);
 	ALBEDO = mix(col, g_fog.rgb, clamp(f, 0.0, 1.0));

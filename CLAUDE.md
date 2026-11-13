@@ -11,7 +11,15 @@ Found-footage хоррор по лору Backrooms Кейна Парсонса (
   `tools/voice/make_voice.py` (Windows TTS: RU Irina/Pavel через WinRT, EN Zira через SAPI) → voice/,
   `tools/models/fetch_models.py` (Poly Haven CC0, glTF 1k) → models/ (+CREDITS.txt),
   `tools/models/fetch_humans.py` (Microsoft Rocketbox, MIT: FBX + цветные TGA, ужаты до 1024) → humans/ (+CREDITS.txt),
-  `tools/tex/make_graffiti.py` — надписи graf.* «от руки» в tex/graf_<ключ>_<ru|en>.png (Segoe Print: у Ink Free «Н»/«H» как «#»).
+  `tools/tex/make_graffiti.py` — надписи graf.* «от руки» в tex/graf_<ключ>_<ru|en>.png (Segoe Print: у Ink Free «Н»/«H» как «#»;
+  поля 32 px, стороны кратны 4; `--repad` — переразметить без перерисовки).
+- Текстуры Комплекса: `make_textures.py` (без аргументов — Комплекс и предметы; `--legacy` — парк/лица/async, побитово как было)
+  пишет 1024² бесшовные текстуры + карты нормалей `<имя>_n.png` (x — вдоль +u, y — вдоль +v ВНИЗ) + маски износа по миру
+  `wall_grime` (4.8×3.2 м), `ceil_stains`, `carpet_damp` (9.6 м). `tools/tex/check_seams.py` — проверка швов (код 1 при сбое),
+  `tools/tex/preview.py` — листы и свотчи. Повторы: обои/ковёр/потолок 1.2 м, плинтус 1.2×0.1, школьная стена 1.2×3.2 (от пола).
+  `tools/tex/make_park.py` → tex/park_*, `tools/tex/make_fx.py` → tex/fx_* (концовки),
+  `tools/tex/make_props.py` → tex/prop_* (плесень, потёки, бумаги, химзащита по текстуре Rocketbox).
+- fix_imports.py: цветные → BC7, `*_n` → normal_map (BC5), маски/noise → без потерь, fixture — без fix_alpha_border.
 - После импорта всегда `python tools/fix_imports.py` и повторный импорт: мип-карты/VRAM для tex и моделей, loop=true для
   звуков из списка LOOPS. Новые зацикленные звуки добавлять в LOOPS и там, и в make_audio.py.
 
@@ -34,8 +42,24 @@ Found-footage хоррор по лору Backrooms Кейна Парсонса (
 - `tools/dev/aabb.gd` — габариты моделей (`--headless --script`).
 
 ## Архитектура (src/)
-- `main.gd` — 3D в SubViewport 480 строк → TextureRect с `shaders/vhs.gdshader`; OSD камеры (`render/osd.gd`) внутри кадра.
+- `main.gd` — цепочка SubViewport: World (3D, MSAA 4x) → Lag/Copy (инерция ярких мест) → Glow1/Glow2 (ореол, HDR) →
+  Meter (экспонометр 16×12, автоирис) → Osd (`render/osd.gd`, прозрачный, поверх объектива) → Cam (`shaders/camera.gdshader`:
+  объектив, ирис/AGC, клип в белое, ореол, баланс белого) → Tape (`shaders/vhs.gdshader`) → экран (`vhs_out.gdshader`).
+  API: `main.exposure` (ирис), `main.gain` (AGC), `main.auto_iris`, `main.meter_avg/meter_hot`, `main.white_balance`, `main.defocus`;
+  `fade_to/set_fade` — затемнение «на плёнке», `ui_fade_to` — поверх UI; `Cfg.frame_rect(view)` — где кадр на экране.
+  OSD: на плёнку пишется только дата/время (и подписи CAM) — стадия Osd; REC/батарея/SP — «видоискатель» `osd.vf` поверх
+  ленты (CanvasLayer 1). `main.freeze_still()` — след последнего кадра для красного экрана смерти. `hot_of` (cam_common) —
+  только настоящие источники (мин. канал), `bright_of` — для экспонометра.
+  Отладка: `--aspect=4:3|16:9 --res=480|600|720` (не сохраняются), `--pause`, `--glitch=<сек>`, `--iris=<x>`, `--no_auto_iris`,
+  `--raw` (ещё <имя>_raw.png — кадр мира до камеры), `--menu=settings`. Камера героя (`player.gd`): инерция, «рука», шаги,
+  автофокус; `player.far` — дальность.
   SubViewport без контейнера сам ввод не получает: `main._unhandled_input` пересылает события через `vp.push_input`.
+- Парк: `scenes/park.gd` + `park_ground.gd` (рельеф, маска дорожек, трава за камерой), `park_trees.gd` (процедурные деревья),
+  `park_far.gd` (дома, дальний лес, холмы, даунтаун); шейдеры `park_*`. Концовки: `scenes/endings.gd`, красный экран смерти —
+  `scenes/red_screen.gd` (и в Комплексе через `Game.die`).
+- Предметы: `Props.model()` — карты нормалей/ARM Poly Haven, стекло (`prop_glass`), решётки по яркости (alpha_from_r),
+  двусторонние (`prop_ds`); `P.mc()` — коробки с текстурой по метрам (box_uv, таблица TILE); тени-пятна `P.blob_under`;
+  вывески в Комплексе — текстура глифов на освещённом квадрате (`Props.label`); деко «on»/«price»/«bulb».
 - Режимы мира: `Cfg.world` (сохраняется) → `Game.mode`; правила — `Game.monsters()/stamina_on()/speed_mode()/freecam_ok()`.
   Базовый: без выносливости; Приключение: ×1,5, без монстров, G — `player/freecam.gd`; Выживание: выносливость, Сущность
   раньше/чаще, две плачущие копии; Полигон: меню в `ui/menus.gd`, запуски `Game.poly_*`, мир полигона с сидом 1990
@@ -43,8 +67,19 @@ Found-footage хоррор по лору Backrooms Кейна Парсонса (
 - autoload: `Cfg` (настройки, ввод, аргументы), `Loc` + `texts.gd` (ключ → [ru, en]; sign./osd. — англ. в «смешанном»),
   `Snd` (шины, варианты `_N`, петли), `Game` (поток игры, генерация мира в WorkerThreadPool во время парка).
 - `world/layer_data.gd` — тор 384×384 клеток по 2.4 м, стены на рёбрах; `worldgen.gd` — два слоя, особые комнаты, кабели, декор.
-- `world/chunk_builder.gd` — меши чанка 12×12 в потоке; свет ламп «запечён» в цвет вершин (r ровный, g мигающий, b красный,
-  a группа мигания; UV2.x — AO). Шейдеры `arch`/`prop`/`decal` unshaded, глобальные uniform `g_*` в project.godot.
+- `world/chunk_builder.gd` — меши чанка 12×12 в потоке. Свет НЕ запекается в вершины: цвет вершин — только вид лампы у
+  светильников (r ровный, g мигающий, b красный, a группа), UV2.x — «глубина» (тьма ям/шахт/провалов, у обычных поверхностей 1).
+  UV стен: u вдоль стены, v = −y (картинки стоят прямо); потолок сдвинут на 0.3 м по x, чтобы светильник 0.6×1.2 лёг в ячейку сетки.
+- Свет попиксельный: `world/light_grid.gd` собирает на слой текстуры `g_cells` (рёбра/пол/потолок/пандус), `g_lamps` (высота,
+  сила, вид, группа ламп) и `g_bounce` (отражённый свет клеток из cell_light чанков); `shaders/grid_light.gdshaderinc` —
+  `g_direct()` (Ламберт + блики от ламп 7×7 клеток, видимость лучом по рёбрам: стены, двери, арки, окна, ступени пола/потолка,
+  наклон пандусов — `g_floor_at`; длинный светильник светит вниз, полутень — до 6 точек по площади лампы `g_vis_tube`;
+  у Сущности лампы гаснут по одной: `g_ldim`/`g_ltime`), `g_bounce_at()` (только из клеток, связанных проёмами — сквозь
+  стены не течёт), `g_ao()` (углы, пол, потолок), `g_perturb()`
+  (карты нормалей <имя>_n.png: x вдоль +u, y вдоль +v вниз). `g_grid.y` = 1 только в Комплексе (и фоне меню); вне его
+  `prop`/`decal` берут свет из instance uniform `light_level`. Группа мигания — `LayerData.flick_group(x, z)`.
+  Шейдеры `arch`/`prop`(+`prop_ds` двусторонний, тело `prop_body.gdshaderinc`)/`decal`/`glass`/`water_cx` unshaded,
+  глобальные uniform `g_*` в project.godot. Тонмап AgX + ореол ламп (SCREEN) — в `Complex._ready`. `--gpu_prof` — время кадра GPU.
 - `world/worldgen_rooms.gd` — каталог «странных комнат» (PLAN: тип, слой, количество, кольцо расстояний, размер) и
   `sprinkle` — мелочи по миру понемногу; места пишутся в `places["room_<тип>_<k>"]`. Строители предметов этих комнат —
   `world/props_rooms.gd` (Props делегирует туда неизвестные виды). `world/tv.gd` (TVHub) — телеканалы 2D-SubViewport.
@@ -62,12 +97,17 @@ Found-footage хоррор по лору Backrooms Кейна Парсонса (
   спуск в воду, «горки», двери в потолке, разноуровневый офис, кривой коридор (`_profile` — высоты вдоль коридора).
   Протечки на потолке и потёки на обоях — `sprinkle_stains`. Эхо по размеру места — `Complex._update_space`
   (шаги идут через шину World), далёкие звуки — `_ambient_tick`.
-- Ранение без полоски: `Complex.hurt` 0..1 → `main.hurt` → `vhs.gdshader` (красное от краёв), падение с высоты считается
+- Ранение без полоски: `Complex.hurt` 0..1 → `main.hurt` → `camera.gdshader` (красное от краёв, до наложения OSD;
+  `vhs.gdshader` добавляет только сбои ленты). AGC везде: `main.gain` — что просит сцена, `main.agc` — по экспонометру,
+  работает `max` (`main.gain_eff`). Падение с высоты считается
   в `_on_landed`; в яму на нижний слой и при приземлении из парка — без урона (`_no_fall_t`).
 - Свет: группы мигания `posmod(x*7+z*13, 7)` с характерами (`FLICK_KIND`), звук ближайшей лампы; питание `g_power`
   (просадки и редкие отключения, `_update_power`). Только жёлтые обои: зон «старое крыло», бетон, плитка в мире нет.
 - Концовки (`scenes/endings.gd`): смерть везде через красное (`_hurt_tick` → `_death` → карточка): океан (плыть вверх),
   небо → лес, шоссе, стена, космос (смотреть на Землю), Async (газ в изоляторе, вид с пола).
+- Свет клеток, который меняют комнаты после расстановки (двери в потолке → L_NONE, плиты у ям → L_HOLE), копится в
+  `Rooms._late_light` и применяется `Rooms.finish_lights(L)` последним шагом layer0/layer1: раньше — сдвинет L.rng и весь сид.
+  Подвесной светильник (тросы, 4.2 м над полом) — только по `LayerData.lamp_hangs` (одно правило для геометрии и света).
 - `layer_data.used`: 1 — особая комната (сюда не ставятся случайные копии/предметы из `_scatter` и `sprinkle`), 2 — свет задан вручную.
 - `world/complex.gd` — подгрузка чанков, слои, экспозиция, мигание, события (яма → слой 1, лестница Async, Порог, нулевая зона).
 - `world/human.gd` — люди: модель Rocketbox (скелет Bip01/Bip02) или запасной вариант из примитивов (`--prim_humans`).

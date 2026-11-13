@@ -1,5 +1,5 @@
 extends Control
-## Субтитры (мысли героя, радио, голос из динамика) и подсказки взаимодействия.
+## Субтитры (мысли героя, радио, голос из динамика) и подсказки взаимодействия. Стоят внутри кадра (и при 4:3).
 
 var _lbl: Label
 var _hint: Label
@@ -7,10 +7,10 @@ var _queue: Array = []
 var _cur_t := 0.0
 var _alpha := 0.0
 var _hint_text := ""
+var _fr := Rect2()
 
 
 func _ready() -> void:
-	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_lbl = Label.new()
 	_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -59,7 +59,21 @@ func hint(text: String) -> void:
 	_hint_text = text
 
 
+## Подписи — внутри прямоугольника кадра; шрифт — от его высоты
+func _layout() -> void:
+	var fr := Cfg.frame_rect(get_viewport_rect())
+	if fr == _fr:
+		return
+	_fr = fr
+	position = fr.position
+	size = fr.size
+	var s := fr.size.y / 720.0
+	_lbl.add_theme_font_size_override("font_size", int(round(24.0 * s)))
+	_hint.add_theme_font_size_override("font_size", int(round(18.0 * s)))
+
+
 func _process(dt: float) -> void:
+	_layout()
 	_hint.text = _hint_text
 	if _queue.is_empty():
 		_alpha = move_toward(_alpha, 0.0, dt * 3.0)

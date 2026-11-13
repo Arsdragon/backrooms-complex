@@ -27,6 +27,8 @@ const WORLDS := ["base", "adventure", "survival", "polygon"]
 var args := {}
 ## Флаги текущего запуска из полигона (те же ключи, что у аргументов: god, place, set, lf_now…)
 var flags := {}
+## Значения из файла для настроек, перекрытых аргументами (--aspect/--res/--vhs): в файл пишутся они, а не перекрытые
+var _file := {}
 
 
 func _ready() -> void:
@@ -37,7 +39,21 @@ func _ready() -> void:
 			args[kv[0]] = kv[1] if kv.size() > 1 else "1"
 	_setup_input()
 	load_cfg()
+	_cli_overrides()
 	apply()
+
+
+## Отладка: --aspect=4:3|16:9, --res=480|600|720, --vhs=0..1.5 — только на этот запуск, в настройки не сохраняются
+func _cli_overrides() -> void:
+	if args.has("aspect") and String(args["aspect"]) in ["4:3", "16:9"]:
+		_file["aspect"] = aspect
+		aspect = String(args["aspect"])
+	if args.has("res") and int(args["res"]) in [480, 600, 720]:
+		_file["res"] = res
+		res = int(args["res"])
+	if args.has("vhs"):
+		_file["vhs"] = vhs
+		vhs = clampf(float(args["vhs"]), 0.0, 1.5)
 
 
 func arg(key: String, def := "") -> String:
@@ -93,9 +109,9 @@ func save_cfg() -> void:
 	c.set_value("audio", "master", vol_master)
 	c.set_value("audio", "sfx", vol_sfx)
 	c.set_value("audio", "amb", vol_amb)
-	c.set_value("video", "vhs", vhs)
-	c.set_value("video", "aspect", aspect)
-	c.set_value("video", "res", res)
+	c.set_value("video", "vhs", _file.get("vhs", vhs))
+	c.set_value("video", "aspect", _file.get("aspect", aspect))
+	c.set_value("video", "res", _file.get("res", res))
 	c.set_value("video", "fullscreen", fullscreen)
 	c.set_value("video", "osd", osd)
 	c.save(PATH)
@@ -115,6 +131,15 @@ func frame_size() -> Vector2i:
 	var w := int(round(h * (4.0 / 3.0 if aspect == "4:3" else 16.0 / 9.0)))
 	w += w % 2
 	return Vector2i(w, h)
+
+
+## Где кадр на экране: прямоугольник формата кадра, вписанный по центру в видимую область view
+## (так же его ставит TextureRect в main.gd). Меню и подписи размещаются внутри него, а не в чёрных полях.
+func frame_rect(view: Rect2) -> Rect2:
+	var fs := Vector2(frame_size())
+	var k := minf(view.size.x / fs.x, view.size.y / fs.y)
+	var sz := fs * k
+	return Rect2(view.position + (view.size - sz) * 0.5, sz)
 
 
 func _key(action: String, keys: Array) -> void:

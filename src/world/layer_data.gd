@@ -77,6 +77,31 @@ static func idx(x: int, z: int) -> int:
 	return posmod(z, N) * N + posmod(x, N)
 
 
+## Висит ли светильник клетки на тросах (4.2 м над её полом): высокий зал или клетка большой просевшей зоны.
+## Одиночная яма/провал в обычном потолке — нет (иначе в яму на 15 м свисает лампа на тросах).
+## Одно правило для ChunkBuilder (геометрия и свет для предметов) и LightGrid (попиксельный свет).
+func lamp_hangs(x: int, z: int) -> bool:
+	var i := idx(x, z)
+	var h := height_m(x, z)
+	var fl := fh[i] * 0.1
+	if h <= 0.01 or h - fl <= 5.0:
+		return false
+	if h > 5.0:
+		return true
+	var sunk := 0
+	for d in 4:
+		var o: Vector2i = DIRS[d]
+		var j := idx(x + o.x, z + o.y)
+		if flo[j] != F_SOLID and fh[j] <= fh[i] + 10:
+			sunk += 1
+	return sunk >= 2
+
+
+## Группа мигания лампы клетки (0..6). Прежняя формула posmod(x*7+z*13, 7) зависела только от z.
+static func flick_group(x: int, z: int) -> int:
+	return posmod(x * 3 + z * 5, 7)
+
+
 static func chunk_key(cx: int, cz: int) -> int:
 	return posmod(cz, NCH) * NCH + posmod(cx, NCH)
 

@@ -3,8 +3,13 @@
 Буквы пляшут (наклон, размер, строка), штрих неровный; стиль выбирается по ключу:
   marker — маркер, сухая кисть;  spray — баллончик с ореолом и потёками;
   scratch — процарапано/карандаш, светлое и тонкое;  smear — бурый мазок пальцами, потёки.
-Тексты берутся из src/autoload/texts.gd (ключи graf.*). Запуск: python tools/tex/make_graffiti.py
+Тексты берутся из src/autoload/texts.gd (ключи graf.*). Запуск: python tools/tex/make_graffiti.py [ключи]
+Каждая картинка обрезается по надписи и получает прозрачное поле 32 px, стороны кратны 4 (блоки BC-сжатия
+4×4: иначе Godot подгоняет размер и мажет края). Размер наклейки в игре = пиксели × k, поэтому поле надпись
+не уменьшает. python tools/tex/make_graffiti.py --repad — только переложить поля у готовых graf_*.png
+(без перерисовки; повторный запуск ничего не меняет).
 """
+import glob
 import hashlib
 import math
 import os
@@ -31,6 +36,7 @@ INK = {
     "smear": [(80, 14, 8), (62, 30, 14)],
 }
 SIZE = 78
+MARGIN = 32                 # прозрачное поле вокруг надписи, px
 
 
 def rng_for(key):
@@ -143,11 +149,11 @@ def render(text, style, r):
             yy = min(H2 - 4, yb + ln)
             xi = int(cx)
             a[yy - 2:yy + 3, max(0, xi - 2):xi + 3] = np.maximum(a[yy - 2:yy + 3, max(0, xi - 2):xi + 3], 0.7)
-    # обрезка по содержимому
+    # обрезка по содержимому (поля добавит frame)
     ys, xs = np.where(a > 0.02)
     if len(xs) == 0:
         return None
-    pad = 14
+    pad = 2
     x0, x1 = max(0, xs.min() - pad), min(W2, xs.max() + pad)
     y0b, y1 = max(0, ys.min() - pad), min(H2, ys.max() + pad)
     a = a[y0b:y1, x0:x1]
@@ -157,10 +163,41 @@ def render(text, style, r):
         rgb[..., i] = ink[i] * (0.85 + 0.3 * r.random())
     out = np.dstack([np.clip(rgb, 0, 255), np.clip(a * 255, 0, 255)]).astype(np.uint8)
     im = Image.fromarray(out)
-    # не больше 1024 по ширине (VRAM и мип-карты)
-    if im.width > 1024:
-        im = im.resize((1024, int(im.height * 1024 / im.width)), Image.LANCZOS)
-    return im
+    # не больше 1024 по ширине вместе с полями (VRAM и мип-карты)
+    lim = 1024 - 2 * MARGIN
+    if im.width > lim:
+        im = im.resize((lim, int(im.height * lim / im.width)), Image.LANCZOS)
+    return frame(im)
+
+
+def frame(im):
+    """Обрезать по альфе и положить по центру холста с полем MARGIN; стороны кратны 4"""
+    im = im.convert("RGBA")
+    bb = im.getchannel("A").getbbox()
+    if bb is None:
+        return im
+    im = im.crop(bb)
+    w = (im.width + 2 * MARGIN + 3) // 4 * 4
+    h = (im.height + 2 * MARGIN + 3) // 4 * 4
+    # прозрачные пиксели — цветом краски (без тёмной каймы при фильтрации)
+    a = np.asarray(im)
+    ink = a[..., :3][a[..., 3] > 128].reshape(-1, 3)
+    c = tuple(int(v) for v in (ink.mean(0) if len(ink) else (0, 0, 0))) + (0,)
+    out = Image.new("RGBA", (w, h), c)
+    out.paste(im, ((w - im.width) // 2, (h - im.height) // 2))
+    return out
+
+
+def repad():
+    """Переложить поля у готовых надписей (без перерисовки)"""
+    n = 0
+    for f in sorted(glob.glob(os.path.join(OUT, "graf_*.png"))):
+        im = Image.open(f)
+        out = frame(im)
+        if out.size != im.size or np.asarray(out.convert("RGBA")).tobytes() != np.asarray(im.convert("RGBA")).tobytes():
+            out.save(f)
+            n += 1
+    print("переложено:", n)
 
 
 def style_for(key):
@@ -174,6 +211,9 @@ def style_for(key):
 
 def main():
     os.makedirs(OUT, exist_ok=True)
+    if "--repad" in sys.argv:
+        repad()
+        return
     texts = load_texts()
     only = sys.argv[1:]
     n = 0
