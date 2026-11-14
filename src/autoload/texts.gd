@@ -33,6 +33,8 @@ const T := {
 	"ui.off": ["Выкл", "Off"],
 	"ui.controls": ["WASD — идти   Shift — бежать   Ctrl — присесть   E — взаимодействовать   Esc — пауза",
 		"WASD — walk   Shift — run   Ctrl — crouch   E — interact   Esc — pause"],
+	"ui.skip_hint": ["Удерживайте Пробел — пропустить парк", "Hold Space — skip the park"],
+	"ui.skip": ["ПРОПУСК ПАРКА", "SKIPPING THE PARK"],
 	"ui.world": ["ВЫБОР МИРА", "CHOOSE A WORLD"],
 	"ui.w_base": ["Базовый", "Standard"],
 	"ui.w_base_d": ["Комплекс как есть. По коридорам бродит Сущность, на нижнем слое — плачущая копия. Бежать можно сколько угодно. Случайные выходы смертельны; настоящий выход — только через Async.",

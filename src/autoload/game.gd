@@ -26,6 +26,8 @@ var run_time := 0.0
 var _menu_layers: Array = []
 var _menu_tmp: Array = []
 var mode := "base"             # мир текущей игры: base | adventure | survival | polygon
+var _skip_hold := 0.0          # сколько секунд держат «пропуск» в парке
+const SKIP_HOLD := 1.0         # столько держать, чтобы пропустить парк (случайное нажатие не сработает)
 var _poly_layers: Array = []   # мир полигона (один и тот же сид, строится один раз)
 var _poly_tmp: Array = []
 const POLY_SEED := 1990
@@ -55,6 +57,11 @@ func freecam_ok() -> bool:
 
 func survival() -> bool:
 	return mode == "survival"
+
+
+## Парк можно пропустить (удержать Пробел/Enter) в обычном мире и в «Выживании»
+func park_skippable() -> bool:
+	return mode == "base" or mode == "survival"
 
 
 func _ready() -> void:
@@ -198,6 +205,7 @@ func new_game(world := "base") -> void:
 func start_park() -> void:
 	state = "park"
 	run_time = 0.0
+	_skip_hold = 0.0
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	var p := ParkS.new()
 	main.set_scene(p)
@@ -212,11 +220,58 @@ func start_park() -> void:
 	Snd.play("rec_beep", -6.0)
 	main.fade_to(Color(0, 0, 0, 0), 1.2)
 	menus.flash_controls()
+	# отладка: --skip_test=<сек> — через N секунд «зажать» пропуск, как игрок (проверка удержания и перехода)
+	if Cfg.has_arg("skip_test"):
+		_skip_test(float(Cfg.arg("skip_test")))
+
+
+func _skip_test(sec: float) -> void:
+	await get_tree().create_timer(sec).timeout
+	print("SKIP press t=%.1f state=%s" % [sec, state])
+	Input.action_press("skip")
+	await get_tree().create_timer(SKIP_HOLD + 0.4).timeout
+	Input.action_release("skip")
+	print("SKIP release state=%s" % state)
+
+
+## Можно ли пропустить парк прямо сейчас: идёт парк, не пауза, провал ещё не начался
+func _can_skip_park() -> bool:
+	if state != "park" or paused or not park_skippable() or main == null:
+		return false
+	var park: Node = main.scene
+	return park != null and is_instance_valid(park) and not bool(park.get("falling"))
+
+
+## Пропуск парка: плёнку «перематывают» вперёд — срыв записи, кадр уходит в черноту,
+## дальше всё как после провала: приземление в Комплексе (мир дождётся генерации, если ещё не готов)
+func skip_park() -> void:
+	if not _can_skip_park():
+		return
+	var park: Node = main.scene
+	park.set("falling", true)          # парк больше сам не начнёт провал
+	state = "skipping"                 # пауза и повторный пропуск на время перемотки не срабатывают
+	_skip_hold = 0.0
+	menus.hide_skip()
+	menus.controls.visible = false
+	main.subs.clear()
+	var pl: Variant = park.get("player")
+	if pl is Node and is_instance_valid(pl):
+		(pl as Node).set("frozen", true)
+	Snd.play("glitch", -3.0)
+	main.burst(1.0)
+	main.tape_glitch(0.9)
+	Snd.stop_loop("park_amb", 0.3)
+	Snd.stop_loop("park_wind", 0.3)
+	Snd.stop_loop("park_hum", 0.3)
+	var tw: Tween = main.fade_to(Color(0, 0, 0, 1), 0.45)
+	await tw.finished
+	Snd.set_reverb(0.55, 0.18)
+	fall_from_park()
 
 
 ## Вызывается парком, когда герой проваливается сквозь землю
 func fall_from_park() -> void:
-	if state != "park":
+	if state != "park" and state != "skipping":
 		return
 	state = "falling"
 	# ждём мир (обычно давно готов)
@@ -383,6 +438,16 @@ func _process(dt: float) -> void:
 		run_time += dt
 	if main == null:
 		return
+	# пропуск парка: держат Пробел/Enter — полоса заполняется; отпустили — сброс
+	if _can_skip_park() and Input.is_action_pressed("skip"):
+		_skip_hold += dt
+		menus.show_skip(_skip_hold / SKIP_HOLD)
+		if _skip_hold >= SKIP_HOLD:
+			skip_park()
+	elif _skip_hold > 0.0:
+		_skip_hold = 0.0
+		if menus != null:
+			menus.hide_skip()
 	var p: Player = null
 	if complex != null and is_instance_valid(complex):
 		p = complex.get("player")

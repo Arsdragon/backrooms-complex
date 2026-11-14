@@ -162,6 +162,8 @@ func _setup_input() -> void:
 	_key("pause", [KEY_ESCAPE, KEY_P])
 	_key("freecam", [KEY_G])
 	_key("fly_up", [KEY_SPACE])
+	# пропуск парка (обычный мир и выживание): удерживать
+	_key("skip", [KEY_SPACE, KEY_ENTER, KEY_KP_ENTER])
 	var m := InputEventMouseButton.new()
 	m.button_index = MOUSE_BUTTON_LEFT
 	InputMap.action_add_event("use", m)

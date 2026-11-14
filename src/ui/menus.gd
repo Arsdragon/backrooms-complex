@@ -22,6 +22,7 @@ var settings_box: VBoxContainer
 var title_box: VBoxContainer
 var intro: Label
 var controls: Label
+var skip_lbl: Label             # «ПРОПУСК ПАРКА ▶▶ ███░░» — пока удерживают Пробел в парке
 var credit: Label
 var _settings_from := "main"
 var _rows := []
@@ -219,6 +220,12 @@ func _build() -> void:
 	controls.offset_top = -64
 	controls.offset_bottom = -16
 	controls.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	skip_lbl = _lbl("", 22, TXT, true)
+	skip_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	frame.add_child(skip_lbl)
+	skip_lbl.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	skip_lbl.offset_top = -118
+	skip_lbl.offset_bottom = -84
 	credit = _lbl("Fan game based on the Backrooms universe of Kane Parsons (Kane Pixels). Not affiliated.", 12, Color(0.75, 0.75, 0.7, 0.7))
 	credit.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	credit.add_theme_constant_override("outline_size", 3)
@@ -712,6 +719,7 @@ func hide_all() -> void:
 	title_box.visible = false
 	intro.visible = false
 	controls.visible = false
+	skip_lbl.visible = false
 	credit.visible = false
 	_dim.visible = false
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -780,6 +788,8 @@ func flash_controls() -> void:
 	controls.text = Loc.t("ui.controls")
 	if Game.freecam_ok():
 		controls.text += "   " + Loc.t("ui.freecam")
+	if Game.park_skippable():
+		controls.text += "\n" + Loc.t("ui.skip_hint")
 	controls.visible = true
 	controls.modulate.a = 0.0
 	var tw := create_tween()
@@ -788,6 +798,18 @@ func flash_controls() -> void:
 	tw.tween_interval(7.0)
 	tw.tween_property(controls, "modulate:a", 0.0, 1.2)
 	tw.tween_callback(func() -> void: controls.visible = false)
+
+
+## Пропуск парка: «ПРОПУСК ПАРКА ▶▶» и полоса удержания (p — 0..1)
+func show_skip(p: float) -> void:
+	var n := 12
+	var k := clampi(int(round(clampf(p, 0.0, 1.0) * n)), 0, n)
+	skip_lbl.text = Loc.t("ui.skip") + "  ▶▶  " + "█".repeat(k) + "░".repeat(n - k)
+	skip_lbl.visible = true
+
+
+func hide_skip() -> void:
+	skip_lbl.visible = false
 
 
 func _unhandled_input(e: InputEvent) -> void:

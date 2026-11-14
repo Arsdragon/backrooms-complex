@@ -26,7 +26,10 @@ Found-footage хоррор по лору Backrooms Кейна Парсонса (
 ## Отладка (аргументы после `--`)
 `tools/dev.sh shot <png> <сек> [args]` (несколько png через `;`, `--every=N`), `tools/dev.sh import`.
 - `--scene=complex|lower|park|ending|gallery`, `--seed=N`, `--place=<ключ LayerData.places>` `--dx/--dz`, `--yaw/--pitch`, `--pos=x,y,z`
-- `--kind=ocean|sky|highway|wall|space|async` (ending), `--force_end=…`, `--fall_at=сек` (парк)
+- `--kind=ocean|sky|highway|wall|space|async` (ending), `--force_end=…`, `--fall_at=сек` (парк),
+  `--skip_test=сек` (парк: через N с «зажать» пропуск, как игрок; пишет `SKIP …`)
+- Пропуск парка: в обычном мире и «Выживании» (`Game.park_skippable`) удержать Пробел/Enter (действие `skip`, `SKIP_HOLD`=1 с)
+  — `Game.skip_park()`: перемотка (сбой ленты, затемнение), дальше как после провала — `fall_from_park` → приземление в Комплексе.
 - `--auto` бот бродит и пишет `BOT …` в лог, `--botrun`, `--lf_now`, `--lf_chase`, `--god`, `--vhs=0..1.5`
 - `--set=copies|copies2|objects|async|lifeform|anim|tv|models0..3` для gallery (камера: `--cx --dist --cy --ly --ox`);
   в парке `--pos=x,y,z --yaw --pitch` (углы в радианах).
