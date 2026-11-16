@@ -1,4 +1,5 @@
 3D-модели: Poly Haven (https://polyhaven.com), лицензия CC0 (общественное достояние).
+EN: 3D models - Poly Haven (https://polyhaven.com), CC0 license (public domain).
 
 plastic_monobloc_chair_01 — https://polyhaven.com/a/plastic_monobloc_chair_01
 metal_office_desk — https://polyhaven.com/a/metal_office_desk

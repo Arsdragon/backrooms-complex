@@ -1,2 +1,4 @@
 Люди: Microsoft Rocketbox Avatar Library (https://github.com/microsoft/Microsoft-Rocketbox), лицензия MIT.
 Copyright (c) Microsoft Corporation. Текстуры уменьшены до 1024 px.
+
+EN: People - Microsoft Rocketbox Avatar Library (https://github.com/microsoft/Microsoft-Rocketbox), MIT license. Copyright (c) Microsoft Corporation. Textures downscaled to 1024 px.

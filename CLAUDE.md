@@ -1,3 +1,7 @@
+> **EN:** Developer notes for AI agents and contributors (in Russian). Project: "Backrooms: The Complex", a found-footage horror in Godot 4.7.2 (Forward+, Windows),
+> set in Kane Parsons' Backrooms lore. Built 50% by Claude Opus 5.5 and 50% by Claude Fable 5.2. Build: `python tools/build.py [--fast]` -> `release/`.
+> See README.md for the bilingual overview and docs/GUIDE.md for the beginner guide.
+
 # Backrooms: Комплекс — Godot 4.7.2 (Forward+), Windows
 
 Found-footage хоррор по лору Backrooms Кейна Парсонса (Kane Pixels): Сан-Хосе, 14.07.1990, герой с видеокамерой
